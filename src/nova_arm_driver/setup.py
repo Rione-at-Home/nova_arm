@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'arm_driver = nova_arm_driver.ArmDriver:main',
         ],
     },
 )

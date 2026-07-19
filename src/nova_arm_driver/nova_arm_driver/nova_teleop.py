@@ -127,6 +127,54 @@ class NovaTeleop(Node):
 
         self.positions[j1] += left * step
         self.positions[j2] += right * step
+    
+    def selected_pose(self):
+
+        item = self.pose_list.currentItem()
+
+        if item is None:
+            return None
+
+        return item.text()
+
+
+    def move_pose(self):
+
+        pose = self.selected_pose()
+
+        if pose is None:
+            return
+
+        msg = String()
+        msg.data = pose
+
+        self.node.move_pub.publish(msg)
+
+
+    def update_pose(self):
+
+        pose = self.selected_pose()
+
+        if pose is None:
+            return
+
+        msg = String()
+        msg.data = pose
+
+        self.node.update_pub.publish(msg)
+
+
+    def delete_pose(self):
+
+        pose = self.selected_pose()
+
+        if pose is None:
+            return
+
+        msg = String()
+        msg.data = pose
+
+        self.node.delete_pub.publish(msg)
 
     def publish_command(self):
 

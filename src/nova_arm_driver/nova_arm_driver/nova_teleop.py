@@ -37,6 +37,12 @@ class NovaTeleop(Node):
             10
         )
 
+        self.save_pub = self.create_publisher(
+            String,
+            "/save_pose",
+            10
+        )
+
         self.page = 0
         self.fine_mode = False
 

@@ -283,9 +283,15 @@ class Window(QWidget):
 
         self.pose_list = QListWidget()
 
+        self.pose_list.itemDoubleClicked.connect(
+            lambda _: self.move_pose()
+        )
+
         layout.addWidget(
             self.pose_list
         )
+
+
 
 
         self.setLayout(layout)

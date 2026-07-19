@@ -36,6 +36,27 @@ class PoseManager(Node):
             10
         )
 
+        self.create_subscription(
+            String,
+            "/move_to_pose",
+            self.move_callback,
+            10
+        )
+
+        self.create_subscription(
+            String,
+            "/update_pose",
+            self.update_callback,
+            10
+        )
+
+        self.create_subscription(
+            String,
+            "/delete_pose",
+            self.delete_callback,
+            10
+        )
+
         self.get_logger().info(
             "Nova Pose Manager Started"
         )

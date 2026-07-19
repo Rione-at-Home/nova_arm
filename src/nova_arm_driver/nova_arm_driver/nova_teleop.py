@@ -2,6 +2,8 @@
 
 import sys
 
+from torch import layout
+
 import rclpy
 from rclpy.node import Node
 
@@ -233,9 +235,10 @@ class Window(QWidget):
 
         self.pose_list = QListWidget()
 
-        self.pose_list.itemDoubleClicked.connect(
-            lambda _: self.move_pose()
-        )
+        layout.addWidget(self.pose_list)
+
+        # Load existing poses
+        self.refresh_pose_list()
 
         layout.addWidget(
             self.pose_list
@@ -254,13 +257,7 @@ class Window(QWidget):
         )
 
         self.update_timer.start(50)
-        self.pose_timer = QTimer()
 
-        self.pose_timer.timeout.connect(
-            self.refresh_pose_list
-        )
-
-        self.pose_timer.start(1000)
 
     def selected_pose(self):
 

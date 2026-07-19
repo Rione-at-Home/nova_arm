@@ -8,6 +8,7 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Int32
 
 
 class NovaDemo(Node):
@@ -16,9 +17,15 @@ class NovaDemo(Node):
 
         super().__init__("nova_demo")
 
-        self.publisher = self.create_publisher(
+        self.pose_pub = self.create_publisher(
             JointState,
             "/arm_command",
+            10
+        )
+
+        self.speed_pub = self.create_publisher(
+            Int32,
+            "/arm_speed",
             10
         )
 
@@ -27,40 +34,112 @@ class NovaDemo(Node):
         )
 
         with open(pose_file, "r") as f:
+
             self.poses = yaml.safe_load(f)
 
         self.sequence = [
-            "home",
-            "ready",
-            "approach",
-            "grasp",
-            "carry",
-            "place",
-            "home",
+            ("home", 30),
+            ("ready", 20),
+            ("approach", 10),
+            ("grasp", 5),
+            ("carry", 15),
+            ("place", 10),
+            ("home", 30),
         ]
 
-    def move_to_pose(self, pose_name):
+        self.current_position = None
 
-        pose = self.poses[pose_name]
+
+    def set_speed(self, percent):
+
+        msg = Int32()
+
+        msg.data = percent
+
+        self.speed_pub.publish(msg)
+
+        self.get_logger().info(
+            f"Speed: {percent}%"
+        )
+
+        time.sleep(0.2)
+
+
+    def publish_pose(self, names, positions):
 
         msg = JointState()
 
-        msg.name = pose["names"]
-        msg.position = pose["positions"]
+        msg.name = names
+        msg.position = positions
 
-        self.publisher.publish(msg)
+        self.pose_pub.publish(msg)
+
+
+    def move_to_pose(
+        self,
+        pose_name,
+        steps=60,
+        dt=0.05
+    ):
+
+        pose = self.poses[pose_name]
+
+        goal = pose["positions"]
+
+        if self.current_position is None:
+
+            self.current_position = goal.copy()
+
+            self.publish_pose(
+                pose["names"],
+                goal
+            )
+
+            time.sleep(2)
+
+            return
+
+        start = self.current_position.copy()
 
         self.get_logger().info(
-            f"Moving to {pose_name}"
+            f"Moving -> {pose_name}"
         )
+
+        for step in range(steps + 1):
+
+            alpha = step / steps
+
+            interp = []
+
+            for s, g in zip(start, goal):
+
+                interp.append(
+                    s + alpha * (g - s)
+                )
+
+            self.publish_pose(
+                pose["names"],
+                interp
+            )
+
+            time.sleep(dt)
+
+        self.current_position = goal.copy()
+
+        time.sleep(0.5)
+
 
     def run(self):
 
-        for pose in self.sequence:
+        for pose_name, speed in self.sequence:
 
-            self.move_to_pose(pose)
+            self.set_speed(speed)
 
-            time.sleep(3)
+            self.move_to_pose(
+                pose_name
+            )
+
+
 
 
 def main(args=None):
@@ -79,4 +158,5 @@ def main(args=None):
 
 
 if __name__ == "__main__":
+
     main()

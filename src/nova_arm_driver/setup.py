@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'arm_driver = nova_arm_driver.ArmDriver:main',
             'nova_teleop = nova_arm_driver.nova_teleop:main',
+            'nova_pose_manager = nova_arm_driver.nova_pose_manager:main',
         ],
     },
 )

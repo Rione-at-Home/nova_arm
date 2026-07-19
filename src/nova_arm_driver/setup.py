@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'arm_driver = nova_arm_driver.ArmDriver:main',
+            'nova_teleop = nova_arm_driver.nova_teleop:main',
         ],
     },
 )

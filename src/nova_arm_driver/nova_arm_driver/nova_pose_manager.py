@@ -6,6 +6,7 @@ import yaml
 import rclpy
 from rclpy.node import Node
 
+from sensor_msgs import msg
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
@@ -67,7 +68,31 @@ class PoseManager(Node):
 
         self.current_pose = msg
 
-    
+    def move_callback(self, msg):
+
+        name = msg.data
+
+        if name not in self.poses:
+
+            self.get_logger().warning(
+                f"Pose '{name}' not found."
+            )
+
+            return
+
+        pose = self.poses[name]
+
+        joint_msg = JointState()
+
+        joint_msg.name = pose["names"]
+        joint_msg.position = pose["positions"]
+
+        self.arm_pub.publish(joint_msg)
+
+        self.get_logger().info(
+            f"Moved to '{name}'"
+        )
+        
 
     def save_callback(self, msg):
 

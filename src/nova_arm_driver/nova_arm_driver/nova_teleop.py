@@ -43,6 +43,31 @@ class NovaTeleop(Node):
             10
         )
 
+        self.save_pub = self.create_publisher(
+            String,
+            "/save_pose",
+            10
+        )
+
+        # New publishers
+        self.move_pub = self.create_publisher(
+            String,
+            "/move_to_pose",
+            10
+        )
+
+        self.update_pub = self.create_publisher(
+            String,
+            "/update_pose",
+            10
+        )
+
+        self.delete_pub = self.create_publisher(
+            String,
+            "/delete_pose",
+            10
+        )
+
         self.page = 0
         self.fine_mode = False
 

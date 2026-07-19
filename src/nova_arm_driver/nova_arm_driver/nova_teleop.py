@@ -206,6 +206,21 @@ class Window(QWidget):
             "Save Pose"
         )
 
+        self.move_button = QPushButton("Move To")
+        self.update_button = QPushButton("Update")
+        self.delete_button = QPushButton("Delete")
+        self.rename_button = QPushButton("Rename")
+
+        layout.addWidget(self.move_button)
+        layout.addWidget(self.update_button)
+        layout.addWidget(self.delete_button)
+        layout.addWidget(self.rename_button)
+
+        self.move_button.clicked.connect(self.move_pose)
+        self.update_button.clicked.connect(self.update_pose)
+        self.delete_button.clicked.connect(self.delete_pose)
+        self.rename_button.clicked.connect(self.rename_pose)
+
         layout.addWidget(
             self.save_button
         )

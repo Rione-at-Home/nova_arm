@@ -128,53 +128,6 @@ class NovaTeleop(Node):
         self.positions[j1] += left * step
         self.positions[j2] += right * step
     
-    def selected_pose(self):
-
-        item = self.pose_list.currentItem()
-
-        if item is None:
-            return None
-
-        return item.text()
-
-
-    def move_pose(self):
-
-        pose = self.selected_pose()
-
-        if pose is None:
-            return
-
-        msg = String()
-        msg.data = pose
-
-        self.node.move_pub.publish(msg)
-
-
-    def update_pose(self):
-
-        pose = self.selected_pose()
-
-        if pose is None:
-            return
-
-        msg = String()
-        msg.data = pose
-
-        self.node.update_pub.publish(msg)
-
-
-    def delete_pose(self):
-
-        pose = self.selected_pose()
-
-        if pose is None:
-            return
-
-        msg = String()
-        msg.data = pose
-
-        self.node.delete_pub.publish(msg)
 
     def publish_command(self):
 
@@ -257,17 +210,14 @@ class Window(QWidget):
         self.move_button = QPushButton("Move To")
         self.update_button = QPushButton("Update")
         self.delete_button = QPushButton("Delete")
-        self.rename_button = QPushButton("Rename")
 
         layout.addWidget(self.move_button)
         layout.addWidget(self.update_button)
         layout.addWidget(self.delete_button)
-        layout.addWidget(self.rename_button)
 
         self.move_button.clicked.connect(self.move_pose)
         self.update_button.clicked.connect(self.update_pose)
         self.delete_button.clicked.connect(self.delete_pose)
-        self.rename_button.clicked.connect(self.rename_pose)
 
         layout.addWidget(
             self.save_button
@@ -312,6 +262,53 @@ class Window(QWidget):
 
         self.pose_timer.start(1000)
 
+    def selected_pose(self):
+
+        item = self.pose_list.currentItem()
+
+        if item is None:
+            return None
+
+        return item.text()
+
+
+    def move_pose(self):
+
+        pose = self.selected_pose()
+
+        if pose is None:
+            return
+
+        msg = String()
+        msg.data = pose
+
+        self.node.move_pub.publish(msg)
+
+
+    def update_pose(self):
+
+        pose = self.selected_pose()
+
+        if pose is None:
+            return
+
+        msg = String()
+        msg.data = pose
+
+        self.node.update_pub.publish(msg)
+
+
+    def delete_pose(self):
+
+        pose = self.selected_pose()
+
+        if pose is None:
+            return
+
+        msg = String()
+        msg.data = pose
+
+        self.node.delete_pub.publish(msg)
 
     def save_pose(self):
 

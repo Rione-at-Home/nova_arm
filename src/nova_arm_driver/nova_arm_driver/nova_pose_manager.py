@@ -39,7 +39,7 @@ class PoseManager(Node):
 
         self.create_subscription(
             String,
-            "/move_to_pose",
+            "/move_pose",
             self.move_callback,
             10
         )

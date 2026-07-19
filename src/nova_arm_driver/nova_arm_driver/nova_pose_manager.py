@@ -93,7 +93,21 @@ class PoseManager(Node):
             f"Moved to '{name}'"
         )
         
+    def delete_callback(self, msg):
 
+        name = msg.data
+
+        if name not in self.poses:
+            return
+
+        del self.poses[name]
+
+        self.save_yaml()
+
+        self.get_logger().info(
+            f"Deleted '{name}'"
+        )
+        
     def save_callback(self, msg):
 
         pose_name = msg.data.strip()

@@ -107,6 +107,21 @@ class NovaTeleop(Node):
         self.publisher.publish(msg)
 
 
+from PyQt5.QtWidgets import (
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QPushButton,
+    QLineEdit,
+    QListWidget,
+)
+
+from std_msgs.msg import String
+
+import yaml
+import os
+
+
 class Window(QWidget):
 
     def __init__(self, node):
@@ -115,9 +130,14 @@ class Window(QWidget):
 
         self.node = node
 
-        self.setWindowTitle("Nova Arm Teleop")
+        self.setWindowTitle("Nova Arm Teach Pendant")
+        self.resize(450, 600)
 
         layout = QVBoxLayout()
+
+        ########################################################
+        # Current Pair
+        ########################################################
 
         self.page_label = QLabel()
         layout.addWidget(self.page_label)
@@ -125,9 +145,13 @@ class Window(QWidget):
         self.mode_label = QLabel()
         layout.addWidget(self.mode_label)
 
+        ########################################################
+        # Joint Values
+        ########################################################
+
         self.labels = []
 
-        for i in range(6):
+        for _ in range(6):
 
             lbl = QLabel()
 
@@ -135,23 +159,100 @@ class Window(QWidget):
 
             self.labels.append(lbl)
 
-        self.help = QLabel(
-            "\n"
-            "L1/R1 : Change Joint Pair\n"
-            "Left Stick : Joint A\n"
-            "Right Stick : Joint B\n"
-            "X : Toggle Fine Mode"
+
+        layout.addWidget(QLabel("Pose Name"))
+
+        self.pose_name = QLineEdit()
+
+        self.pose_name.setPlaceholderText(
+            "pickup_bag"
         )
 
-        layout.addWidget(self.help)
+        layout.addWidget(self.pose_name)
+
+
+        self.save_button = QPushButton(
+            "Save Pose"
+        )
+
+        layout.addWidget(
+            self.save_button
+        )
+
+        self.save_button.clicked.connect(
+            self.save_pose
+        )
+
+
+        # Saved Poses
+        layout.addWidget(QLabel("Saved Poses"))
+
+        self.pose_list = QListWidget()
+
+        layout.addWidget(
+            self.pose_list
+        )
+
 
         self.setLayout(layout)
 
-        timer = QTimer(self)
 
-        timer.timeout.connect(self.update_gui)
+        self.update_timer = QTimer()
 
-        timer.start(50)
+        self.update_timer.timeout.connect(
+            self.update_gui
+        )
+
+        self.update_timer.start(50)
+        self.pose_timer = QTimer()
+
+        self.pose_timer.timeout.connect(
+            self.refresh_pose_list
+        )
+
+        self.pose_timer.start(1000)
+
+
+    def save_pose(self):
+
+        name = self.pose_name.text().strip()
+
+        if name == "":
+            return
+
+        msg = String()
+
+        msg.data = name
+
+        self.node.save_pub.publish(msg)
+
+
+    def refresh_pose_list(self):
+
+        pose_file = os.path.expanduser(
+            "~/nova_arm_ws/poses.yaml"
+        )
+
+        if not os.path.exists(
+            pose_file
+        ):
+            return
+
+        with open(
+            pose_file,
+            "r"
+        ) as f:
+
+            poses = yaml.safe_load(f)
+
+        self.pose_list.clear()
+
+        if poses:
+
+            for name in poses.keys():
+
+                self.pose_list.addItem(name)
+
 
     def update_gui(self):
 
@@ -170,18 +271,23 @@ class Window(QWidget):
             f"<h2>{pages[self.node.page]}</h2>"
         )
 
-        mode = "Fine" if self.node.fine_mode else "Normal"
+        mode = (
+            "Fine"
+            if self.node.fine_mode
+            else "Normal"
+        )
 
         self.mode_label.setText(
             f"<b>Mode:</b> {mode}"
         )
 
-        for i, value in enumerate(self.node.positions):
+        for i, value in enumerate(
+            self.node.positions
+        ):
 
             self.labels[i].setText(
                 f"{self.node.joint_names[i]} : {value:.3f} rad"
             )
-
 
 def main(args=None):
 

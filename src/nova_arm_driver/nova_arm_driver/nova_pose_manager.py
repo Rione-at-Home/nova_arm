@@ -107,6 +107,21 @@ class PoseManager(Node):
         self.get_logger().info(
             f"Deleted '{name}'"
         )
+    
+    def update_callback(self, msg):
+
+        name = msg.data
+
+        if name not in self.poses:
+            return
+
+        self.poses[name]["positions"] = self.current_positions.copy()
+
+        self.save_yaml()
+
+        self.get_logger().info(
+            f"Updated '{name}'"
+        )
         
     def save_callback(self, msg):
 

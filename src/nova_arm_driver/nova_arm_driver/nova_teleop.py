@@ -42,8 +42,8 @@ class NovaTeleop(Node):
 
         self.previous_buttons = []
 
-        self.step = 0.02
-        self.fine_step = 0.005
+        self.step = 0.05
+        self.fine_step = 0.01
 
         self.positions = [0.0] * 6
 

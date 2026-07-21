@@ -107,7 +107,10 @@ class NovaDemo(Node):
 
         for step in range(steps + 1):
 
-            alpha = step / steps
+            raw_alpha = step / steps
+
+            # Quintic Easing
+            alpha = raw_alpha ** 3 * (raw_alpha * (raw_alpha * 6 - 15) + 10)
 
             interp = []
 

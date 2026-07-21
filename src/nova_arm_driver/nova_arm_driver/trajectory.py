@@ -1,10 +1,6 @@
-#!/usr/bin/env python3
-
-import time
-import numpy as np
-
 from sensor_msgs.msg import JointState
-
+import numpy as np
+from scipy.interpolate import CubicSpline
 
 class TrajectoryPlanner:
 
@@ -12,32 +8,47 @@ class TrajectoryPlanner:
 
         self.node = node
 
-        self.publisher = node.create_publisher(
+        self.pose_pub = node.create_publisher(
             JointState,
             "/arm_command",
             10
         )
 
-    ###########################################################
+        self.active_spline = None
+        self.total_duration = 0.0
 
-    def cubic_segment(self):
-        """
-        Computes one cubic spline segment.
-        """
+    def prepare_segment(
+        self,
+        poses,
+        sequence_subset,
+        segment_duration=2.0,
+    ):
 
-        pass
+        waypoints = [
+            poses[name]["positions"]
+            for name in sequence_subset
+        ]
 
-    ###########################################################
+        num = len(waypoints)
 
-    def interpolate_segment(self):
-        """
-        Generates interpolated points between
-        two joint configurations.
-        """
+        time_points = np.linspace(
+            0,
+            (num - 1) * segment_duration,
+            num
+        )
 
-        pass
+        self.active_spline = CubicSpline(
+            time_points,
+            waypoints,
+            axis=0,
+            bc_type="clamped",
+        )
 
-    ###########################################################
+        self.total_duration = time_points[-1]
+
+    def evaluate(self, t):
+
+        return self.active_spline(t).tolist()
 
     def publish(self, names, positions):
 
@@ -46,22 +57,4 @@ class TrajectoryPlanner:
         msg.name = names
         msg.position = positions
 
-        self.publisher.publish(msg)
-
-    ###########################################################
-
-    def execute_segment(self):
-        """
-        Publish every point in a trajectory.
-        """
-
-        pass
-
-    ###########################################################
-
-    def execute_path(self):
-        """
-        Execute multiple spline segments.
-        """
-
-        pass
+        self.pose_pub.publish(msg)

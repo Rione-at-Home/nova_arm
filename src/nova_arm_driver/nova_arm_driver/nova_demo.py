@@ -11,6 +11,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Int32
 
+from .trajectory import TrajectoryPlanner 
+
 
 class NovaDemoPrecision(Node):
 
@@ -42,6 +44,8 @@ class NovaDemoPrecision(Node):
 
         # ROS 2 High-Precision Timer
         self.timer = None
+
+        self.planner = TrajectoryPlanner(self)
 
     def set_speed(self, percent):
         msg = Int32()

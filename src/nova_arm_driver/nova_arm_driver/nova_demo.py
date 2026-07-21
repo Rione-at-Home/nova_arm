@@ -7,28 +7,19 @@ import yaml
 import rclpy
 from rclpy.node import Node
 
-from sensor_msgs.msg import JointState
-from std_msgs.msg import Int32
-
-import numpy as np
-from scipy.interpolate import CubicSpline
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from builtin_interfaces.msg import Duration
 
 
-class NovaDemo(Node):
+class NovaDemoTrajectory(Node):
 
     def __init__(self):
+        super().__init__("nova_demo_trajectory")
 
-        super().__init__("nova_demo")
-
-        self.pose_pub = self.create_publisher(
-            JointState,
-            "/arm_command",
-            10
-        )
-
-        self.speed_pub = self.create_publisher(
-            Int32,
-            "/arm_speed",
+        # Publisher
+        self.trajectory_pub = self.create_publisher(
+            JointTrajectory,
+            "/joint_trajectory_controller/joint_trajectory",
             10
         )
 
@@ -37,173 +28,90 @@ class NovaDemo(Node):
         )
 
         with open(pose_file, "r") as f:
-
             self.poses = yaml.safe_load(f)
 
-        self.sequence = [
-            ("home", 50),
-            ("ready", 50),
-            ("approach", 60),
-            ("grasp", 45),
-            ("carry", 45),
-            ("place", 40),
-            ("home", 50),
-        ]
 
-        self.current_position = None
-
-
-    def set_speed(self, percent):
-
-        msg = Int32()
-
-        msg.data = percent
-
-        self.speed_pub.publish(msg)
-
-        self.get_logger().info(
-            f"Speed: {percent}%"
-        )
-
-        time.sleep(0.2)
-
-
-    def publish_pose(self, names, positions):
-
-        msg = JointState()
-
-        msg.name = names
-        msg.position = list(map(float, positions))
-
-        self.pose_pub.publish(msg)
-
-    def execute_spline_sequence(self, sequence_subset, segment_duration=2.5, dt=0.02):
-        """Execute a sequence of poses using cubic spline interpolation."""
-
+    def build_trajectory_message(self, sequence_subset, segment_duration=2.0):
+        """
+        Creates a JointTrajectory message for a sequence of keyframe poses.
+        
+        :param sequence_subset: List of pose names from poses.yaml
+        :param segment_duration: Time in seconds between each pose waypoint
+        """
+        msg = JointTrajectory()
         joint_names = self.poses["home"]["names"]
+        msg.joint_names = joint_names
 
-        waypoints = [self.poses[pose_name]["positions"] for pose_name in sequence_subset]
+        cumulative_time = 0.0
 
+        for pose_name in sequence_subset:
+            
+            point = JointTrajectoryPoint()
+            point.positions = self.poses[pose_name]["positions"]
 
-        num_waypoints = len(waypoints)
-        time_points = np.linspace(0, segment_duration * (num_waypoints - 1), num_waypoints)
+            # Convert target time into ROS 2 Duration message
+            sec = int(cumulative_time)
+            nanosec = int((cumulative_time - sec) * 1e9)
+            point.time_from_start = Duration(sec=sec, nanosec=nanosec)
+            msg.points.append(point)
 
-        cs = CubicSpline(time_points, waypoints, axis=0, bc_type='clamped')
+            # Add timestamp for the next waypoint
+            cumulative_time += segment_duration
 
-        sample_times = np.arange(0, time_points[-1], dt)
-
-        for t in sample_times:
-            interpolated_positions = cs(t)
-
-            self.publish_pose(joint_names, interpolated_positions)
-
-            time.sleep(dt)
-
-        self.publish_pose(joint_names, waypoints[-1])
-
-    def run_spline_sequence(self, segment_duration=2.5, dt=0.02):
+        return msg, cumulative_time
 
 
-        self.get_logger().info("Starting spline sequence...")
-        self.execute_spline_sequence(["home", "ready", "approach", "grasp"], segment_duration)
+    def execute_sequence(self):
 
-        self.get_logger().info("Grasping object...")
-        time.sleep(1)
+        time.sleep(1.0)
 
-        self.get_logger().info("Carrying object...")
-        self.execute_spline_sequence(["grasp", "carry", "place"], segment_duration)
-
-        self.get_logger().info("Placing object...")
-        time.sleep(1)
-
-        self.get_logger().info("Returning to home position...")
-        self.execute_spline_sequence(["place", "home"], segment_duration)
-
-    def move_to_pose(
-        self,
-        pose_name,
-        steps=60,
-        dt=0.05
-    ):
-
-        pose = self.poses[pose_name]
-
-        goal = pose["positions"]
-
-        if self.current_position is None:
-
-            self.current_position = goal.copy()
-
-            self.publish_pose(
-                pose["names"],
-                goal
-            )
-
-            time.sleep(2)
-
-            return
-
-        start = self.current_position.copy()
-
-        self.get_logger().info(
-            f"Moving -> {pose_name}"
+        # Segment 1: Home -> Ready -> Approach -> Grasp
+        self.get_logger().info("Phase A: Moving to target bag...")
+        msg_a, duration_a = self.build_trajectory_message(
+            ["home", "ready", "approach", "grasp"], 
+            segment_duration=2.0
         )
+        self.trajectory_pub.publish(msg_a)
+        time.sleep(duration_a + 0.5) # Wait for hardware execution to finish
 
-        for step in range(steps + 1):
+        # Action Pause: Gripper closing time
+        self.get_logger().info("Grasping object...")
+        time.sleep(1.0)
 
-            raw_alpha = step / steps
+        # Segment 2: Grasp -> Carry -> Place
+        self.get_logger().info("Phase B: Carrying object to place destination...")
+        msg_b, duration_b = self.build_trajectory_message(
+            ["grasp", "carry", "place"], 
+            segment_duration=2.0
+        )
+        self.trajectory_pub.publish(msg_b)
+        time.sleep(duration_b + 0.5)
 
-            # Quintic Easing
-            alpha = raw_alpha ** 3 * (raw_alpha * (raw_alpha * 6 - 15) + 10)
+        # Action Pause: Gripper releasing time
+        self.get_logger().info("Releasing object...")
+        time.sleep(1.0)
 
-            interp = []
+        # Segment 3: Place -> Home
+        self.get_logger().info("Phase C: Returning Home...")
+        msg_c, duration_c = self.build_trajectory_message(
+            ["place", "home"], 
+            segment_duration=2.0
+        )
+        self.trajectory_pub.publish(msg_c)
+        time.sleep(duration_c + 0.5)
 
-            for s, g in zip(start, goal):
-
-                interp.append(
-                    s + alpha * (g - s)
-                )
-
-            self.publish_pose(
-                pose["names"],
-                interp
-            )
-
-            time.sleep(dt)
-
-        self.current_position = goal.copy()
-
-        time.sleep(0.5)
-
-
-    def run(self):
-
-        for pose_name, speed in self.sequence:
-
-            self.set_speed(speed)
-
-            self.move_to_pose(
-                pose_name
-            )
-
-
+        self.get_logger().info("Full competition trajectory completed!")
 
 
 def main(args=None):
-
     rclpy.init(args=args)
-
-    node = NovaDemo()
-
-    time.sleep(1)
-
-    node.run_spline_sequence(segment_duration=2.5, dt=0.02)
+    node = NovaDemoTrajectory()
+    
+    node.execute_sequence()
 
     node.destroy_node()
-
     rclpy.shutdown()
 
 
 if __name__ == "__main__":
-
     main()

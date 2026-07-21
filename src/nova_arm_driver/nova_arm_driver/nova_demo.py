@@ -10,6 +10,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Int32
 
+import numpy as np
+from scipy.interpolate import CubicSpline
+
 
 class NovaDemo(Node):
 
@@ -74,6 +77,43 @@ class NovaDemo(Node):
 
         self.pose_pub.publish(msg)
 
+    def run_spline_sequence(self, segment_duration=2.5, dt=0.02):
+        """
+        Takes a sequence of poses and moves the arm through them using cubic spline interpolation.
+        Each segment between two poses will take 'segment_duration' seconds, and the arm's position
+        will be updated every 'dt' seconds.
+        """
+
+        joint_names = self.poses["home"]["names"]
+
+        waypoints = [self.poses[pose_name]["positions"] for pose_name, _ in self.sequence]
+
+        self.get_logger().info("Moving to initial position...")
+        self.publish_pose(joint_names, waypoints[0])
+        time.sleep(2)
+
+        num_waypoints = len(waypoints)
+        time_points = np.linspace(0, segment_duration * (num_waypoints - 1), num_waypoints)
+
+
+        self.get_logger().info("Starting spline interpolation sequence...")
+        cs = CubicSpline(time_points, waypoints, axis=0)
+
+        total_duration = time_points[-1]
+        sample_times = np.arange(0, total_duration, dt)
+
+        self.get_logger().info(f"Total duration: {total_duration:.2f}s, Sample times: {len(sample_times)}")
+
+        for t in sample_times:
+            
+            interpolated_positions = cs(t)
+
+            self.publish_pose(joint_names, interpolated_positions)
+
+            time.sleep(dt)
+    
+        self.publish_pose(joint_names, waypoints[-1])
+        self.get_logger().info("Spline interpolation sequence completed.")
 
     def move_to_pose(
         self,
@@ -153,7 +193,7 @@ def main(args=None):
 
     time.sleep(1)
 
-    node.run()
+    node.run_spline_sequence(segment_duration=2.5, dt=0.02)
 
     node.destroy_node()
 

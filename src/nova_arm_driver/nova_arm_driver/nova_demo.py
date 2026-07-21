@@ -19,11 +19,6 @@ class NovaDemoPrecision(Node):
     def __init__(self):
         super().__init__("nova_demo_precision")
 
-        self.pose_pub = self.create_publisher(
-            JointState,
-            "/arm_command",
-            10
-        )
 
         self.speed_pub = self.create_publisher(
             Int32,
@@ -37,15 +32,16 @@ class NovaDemoPrecision(Node):
 
         self.joint_names = self.poses["home"]["names"]
 
-        self.active_spline = None
-        self.total_duration = 0.0
-        self.start_time = None
         self.dt = 0.02  # 50 Hz control loop
 
         # ROS 2 High-Precision Timer
         self.timer = None
 
-        self.planner = TrajectoryPlanner(self)
+        self.planner = TrajectoryPlanner(
+            node=self,
+            poses=self.poses,
+            joint_names=self.joint_names
+        )
 
     def set_speed(self, percent):
         msg = Int32()
@@ -53,73 +49,51 @@ class NovaDemoPrecision(Node):
         self.speed_pub.publish(msg)
         time.sleep(0.1)
 
-    def publish_pose(self, positions):
-        msg = JointState()
-        msg.name = self.joint_names
-        msg.position = positions
-        self.pose_pub.publish(msg)
 
-    def prepare_spline_segment(self, sequence_subset, segment_duration=2.0):
-        """Generates the cubic spline function for a set of poses."""
-        
-        waypoints = [self.poses[pose_name]["positions"] for pose_name in sequence_subset]
-        num_waypoints = len(waypoints)
-        
-        time_points = np.linspace(0, (num_waypoints - 1) * segment_duration, num_waypoints)
-        
-        # 'clamped' enforces zero velocity at start and end of segment
-        self.active_spline = CubicSpline(time_points, waypoints, axis=0, bc_type='clamped')
-        self.total_duration = time_points[-1]
-        self.start_time = self.get_clock().now()
-
+   
     def run_full_mission(self):
-        # Set arm speed
+
         self.set_speed(30)
 
-        # Segment 1: Approach & Grasp
-        self.get_logger().info("Phase A: Moving to target bag...")
-        self.execute_segment_blocking(["home", "ready", "approach", "grasp"], segment_duration=2.0)
+        self.get_logger().info(
+            "Phase A: Moving to target bag..."
+        )
 
-        # Gripper Pause
-        self.get_logger().info("Grasping object...")
+        self.planner.execute_segment(
+            ["home", "ready", "approach", "grasp"]
+        )
+
+        self.get_logger().info(
+            "Grasping object..."
+        )
+
         time.sleep(1.0)
 
-        # Segment 2: Carry & Place
-        self.get_logger().info("Phase B: Carrying object to place destination...")
-        self.execute_segment_blocking(["grasp", "carry", "place"], segment_duration=2.0)
+        self.get_logger().info(
+            "Phase B: Carrying object..."
+        )
 
-        # Gripper Pause
-        self.get_logger().info("Releasing object...")
+        self.planner.execute_segment(
+            ["grasp", "carry", "place"]
+        )
+
+        self.get_logger().info(
+            "Releasing object..."
+        )
+
         time.sleep(1.0)
 
-        # Segment 3: Return Home
-        self.get_logger().info("Phase C: Returning Home...")
-        self.execute_segment_blocking(["place", "home"], segment_duration=2.0)
+        self.get_logger().info(
+            "Phase C: Returning Home..."
+        )
 
-        self.get_logger().info("Mission Completed Successfully!")
+        self.planner.execute_segment(
+            ["place", "home"]
+        )
 
-    def execute_segment_blocking(self, sequence_subset, segment_duration=2.0):
-        self.prepare_spline_segment(sequence_subset, segment_duration)
-        
-        # Run a 50Hz streaming loop using ROS Clock
-        start_nano = self.get_clock().now().nanoseconds
-        total_nano = int(self.total_duration * 1e9)
-
-        while rclpy.ok():
-            now_nano = self.get_clock().now().nanoseconds
-            elapsed_sec = (now_nano - start_nano) / 1e9
-
-            if elapsed_sec >= self.total_duration:
-                # Final position publish
-                final_pos = self.poses[sequence_subset[-1]]["positions"]
-                self.publish_pose(final_pos)
-                break
-
-            # Evaluate spline at exact current timestamp
-            current_positions = self.active_spline(elapsed_sec).tolist()
-            self.publish_pose(current_positions)
-            
-            time.sleep(self.dt)
+        self.get_logger().info(
+            "Mission Completed Successfully!"
+        )
 
 
 def main(args=None):

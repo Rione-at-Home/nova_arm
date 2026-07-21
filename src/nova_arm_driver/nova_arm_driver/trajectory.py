@@ -1,12 +1,19 @@
-from sensor_msgs.msg import JointState
+import time
+
 import numpy as np
+import rclpy
+
 from scipy.interpolate import CubicSpline
+from sensor_msgs.msg import JointState
+
 
 class TrajectoryPlanner:
 
-    def __init__(self, node):
+    def __init__(self, node, poses, joint_names):
 
         self.node = node
+        self.poses = poses
+        self.joint_names = joint_names
 
         self.pose_pub = node.create_publisher(
             JointState,
@@ -19,13 +26,11 @@ class TrajectoryPlanner:
 
     def prepare_segment(
         self,
-        poses,
         sequence_subset,
-        segment_duration=2.0,
+        segment_duration=2.0
     ):
-
         waypoints = [
-            poses[name]["positions"]
+            self.poses[name]["positions"]
             for name in sequence_subset
         ]
 
@@ -50,11 +55,44 @@ class TrajectoryPlanner:
 
         return self.active_spline(t).tolist()
 
-    def publish(self, names, positions):
+    def publish(self, positions):
 
         msg = JointState()
-
-        msg.name = names
+        msg.name = self.joint_names
         msg.position = positions
-
         self.pose_pub.publish(msg)
+    
+    def execute_segment(
+    self,
+    sequence_subset,
+    segment_duration=2.0,
+    dt=0.02,):
+        
+        
+        self.prepare_segment(
+            sequence_subset,
+            segment_duration
+        )
+                        
+        # Run a 50Hz streaming loop using ROS Clock
+        start_nano = self.node.get_clock().now().nanoseconds
+
+        while rclpy.ok():
+            now_nano = self.node.get_clock().now().nanoseconds
+            elapsed_sec = (now_nano - start_nano) / 1e9
+
+            if elapsed_sec >= self.total_duration:
+                # Final position publish
+                final_pos = self.poses[sequence_subset[-1]]["positions"]
+                self.publish(final_pos)
+                time.sleep(dt)
+                break
+            
+            # Evaluate spline at exact current timestamp
+            current_positions = self.evaluate(elapsed_sec)
+
+            self.publish(
+                current_positions
+            )
+                        
+            time.sleep(dt)

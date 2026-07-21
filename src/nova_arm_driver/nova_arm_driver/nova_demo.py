@@ -73,7 +73,7 @@ class NovaDemo(Node):
         msg = JointState()
 
         msg.name = names
-        msg.position = positions
+        msg.position = list(map(float, positions))
 
         self.pose_pub.publish(msg)
 

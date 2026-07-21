@@ -38,13 +38,13 @@ class NovaDemo(Node):
             self.poses = yaml.safe_load(f)
 
         self.sequence = [
-            ("home", 30),
-            ("ready", 20),
-            ("approach", 10),
-            ("grasp", 5),
-            ("carry", 15),
-            ("place", 10),
-            ("home", 30),
+            ("home", 50),
+            ("ready", 50),
+            ("approach", 60),
+            ("grasp", 45),
+            ("carry", 45),
+            ("place", 40),
+            ("home", 50),
         ]
 
         self.current_position = None

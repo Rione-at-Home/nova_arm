@@ -77,43 +77,47 @@ class NovaDemo(Node):
 
         self.pose_pub.publish(msg)
 
-    def run_spline_sequence(self, segment_duration=2.5, dt=0.02):
-        """
-        Takes a sequence of poses and moves the arm through them using cubic spline interpolation.
-        Each segment between two poses will take 'segment_duration' seconds, and the arm's position
-        will be updated every 'dt' seconds.
-        """
+    def execute_spline_sequence(self, sequence_subset, segment_duration=2.5, dt=0.02):
+        """Execute a sequence of poses using cubic spline interpolation."""
 
         joint_names = self.poses["home"]["names"]
 
-        waypoints = [self.poses[pose_name]["positions"] for pose_name, _ in self.sequence]
+        waypoints = [self.poses[pose_name]["positions"] for pose_name in sequence_subset]
 
-        self.get_logger().info("Moving to initial position...")
-        self.publish_pose(joint_names, waypoints[0])
-        time.sleep(2)
 
         num_waypoints = len(waypoints)
         time_points = np.linspace(0, segment_duration * (num_waypoints - 1), num_waypoints)
 
+        cs = CubicSpline(time_points, waypoints, axis=0, bc_type='clamped')
 
-        self.get_logger().info("Starting spline interpolation sequence...")
-        cs = CubicSpline(time_points, waypoints, axis=0)
-
-        total_duration = time_points[-1]
-        sample_times = np.arange(0, total_duration, dt)
-
-        self.get_logger().info(f"Total duration: {total_duration:.2f}s, Sample times: {len(sample_times)}")
+        sample_times = np.arange(0, time_points[-1], dt)
 
         for t in sample_times:
-            
             interpolated_positions = cs(t)
 
             self.publish_pose(joint_names, interpolated_positions)
 
             time.sleep(dt)
-    
+
         self.publish_pose(joint_names, waypoints[-1])
-        self.get_logger().info("Spline interpolation sequence completed.")
+
+    def run_spline_sequence(self, segment_duration=2.5, dt=0.02):
+
+
+        self.get_logger().info("Starting spline sequence...")
+        self.execute_spline_sequence(["home", "ready", "approach", "grasp"], segment_duration)
+
+        self.get_logger().info("Grasping object...")
+        time.sleep(1)
+
+        self.get_logger().info("Carrying object...")
+        self.execute_spline_sequence(["grasp", "carry", "place"], segment_duration)
+
+        self.get_logger().info("Placing object...")
+        time.sleep(1)
+
+        self.get_logger().info("Returning to home position...")
+        self.execute_spline_sequence(["place", "home"], segment_duration)
 
     def move_to_pose(
         self,

@@ -31,15 +31,27 @@ BAUDRATE = 1000000
 
 # CONTROL TABLE
 
-JOINT_TO_ID = {
-    "joint1": 1,
-    "joint2": 2,
-    "joint3": 3,
-    "joint4": 4,
-    "joint5": 5,
-    "gripper": 6,
+# Right Side Arm
+RIGHT_JOINT_TO_ID = {
+    "right_joint1": 1,
+    "right_joint2": 2,
+    "right_joint3": 3,
+    "right_joint4": 4,
+    "right_joint5": 5,
+    "right_gripper": 6,
 }
 
+# Left Side Arm
+LEFT_JOINT_TO_ID = {
+    "left_joint1": 11,
+    "left_joint2": 12,
+    "left_joint3": 13,
+    "left_joint4": 14,
+    "left_joint5": 15,
+    "left_gripper": 16,
+}
+
+JOINT_TO_ID = {**RIGHT_JOINT_TO_ID, **LEFT_JOINT_TO_ID}
 
 # HELPERS
 

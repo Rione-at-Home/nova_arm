@@ -1,6 +1,7 @@
 # nova_arm
 
-A ROS 2 driver package for controlling a custom 6-DOF robotic arm using **Dynamixel AX-12A** servos.
+A ROS 2 driver package for controlling a custom 6-DOF robotic arm using **Dynamixel AX-12A** servos. This version exists to control a single arm rather than managing 
+the dual arm setup.
 
 ## Features
 

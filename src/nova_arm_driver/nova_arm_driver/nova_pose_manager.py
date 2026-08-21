@@ -6,7 +6,6 @@ import yaml
 import rclpy
 from rclpy.node import Node
 
-from sensor_msgs import msg
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
@@ -18,9 +17,30 @@ class PoseManager(Node):
         super().__init__("nova_pose_manager")
 
         self.current_pose = JointState()
+        self.current_positions = []
 
         self.pose_file = os.path.expanduser(
             "~/nova_arm_ws/poses.yaml"
+        )
+
+        # Load existing poses at startup
+        self.poses = {}
+
+        if os.path.exists(self.pose_file):
+
+            with open(self.pose_file, "r") as f:
+
+                loaded = yaml.safe_load(f)
+
+            if loaded is not None:
+                self.poses = loaded
+
+        # Publisher so this node can command the arm directly
+        # (needed for move_callback)
+        self.arm_pub = self.create_publisher(
+            JointState,
+            "/arm_command",
+            10
         )
 
         self.create_subscription(
@@ -62,11 +82,10 @@ class PoseManager(Node):
             "Nova Pose Manager Started"
         )
 
-  
-
     def pose_callback(self, msg):
 
         self.current_pose = msg
+        self.current_positions = list(msg.position)
 
     def move_callback(self, msg):
 
@@ -92,7 +111,7 @@ class PoseManager(Node):
         self.get_logger().info(
             f"Moved to '{name}'"
         )
-        
+
     def delete_callback(self, msg):
 
         name = msg.data
@@ -107,12 +126,20 @@ class PoseManager(Node):
         self.get_logger().info(
             f"Deleted '{name}'"
         )
-    
+
     def update_callback(self, msg):
 
         name = msg.data
 
         if name not in self.poses:
+            return
+
+        if not self.current_positions:
+
+            self.get_logger().warning(
+                "No current position received yet; can't update."
+            )
+
             return
 
         self.poses[name]["positions"] = self.current_positions.copy()
@@ -122,7 +149,7 @@ class PoseManager(Node):
         self.get_logger().info(
             f"Updated '{name}'"
         )
-        
+
     def save_callback(self, msg):
 
         pose_name = msg.data.strip()
@@ -135,38 +162,30 @@ class PoseManager(Node):
 
             return
 
-        poses = {}
+        # Refresh from current in-memory state
+        # (self.poses is kept up to date across calls)
+        self.poses[pose_name] = {
 
-        if os.path.exists(self.pose_file):
-
-            with open(self.pose_file, "r") as f:
-
-                loaded = yaml.safe_load(f)
-
-                if loaded is not None:
-                    poses = loaded
-
-        poses[pose_name] = {
-
-            "names":
-                list(self.current_pose.name),
-
-            "positions":
-                list(self.current_pose.position),
+            "names": list(self.current_pose.name),
+            "positions": list(self.current_pose.position),
 
         }
 
-        with open(self.pose_file, "w") as f:
-
-            yaml.dump(
-                poses,
-                f,
-                sort_keys=False
-            )
+        self.save_yaml()
 
         self.get_logger().info(
             f"Saved pose '{pose_name}'"
         )
+
+    def save_yaml(self):
+
+        with open(self.pose_file, "w") as f:
+
+            yaml.dump(
+                self.poses,
+                f,
+                sort_keys=False
+            )
 
 
 ############################################################

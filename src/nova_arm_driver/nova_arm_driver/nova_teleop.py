@@ -78,16 +78,14 @@ class NovaTeleop(Node):
         self.step = 0.05
         self.fine_step = 0.01
 
-        self.positions = [0.0] * 6
-
         self.joint_names = [
-            "joint1",
-            "joint2",
-            "joint3",
-            "joint4",
-            "joint5",
-            "gripper",
+            "right_joint1", "right_joint2", "right_joint3",
+            "right_joint4", "right_joint5", "right_gripper",
+            "left_joint1", "left_joint2", "left_joint3",
+            "left_joint4", "left_joint5", "left_gripper",
         ]
+
+        self.positions = [0.0] * 12
 
         self.axes = [0.0] * 8
 

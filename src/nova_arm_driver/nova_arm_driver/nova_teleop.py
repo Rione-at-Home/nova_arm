@@ -1,403 +1,281 @@
 #!/usr/bin/env python3
 
-import sys
-
-from torch import layout
+import math
 
 import rclpy
 from rclpy.node import Node
 
-from sensor_msgs.msg import Joy
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Int32
 
-from PyQt5.QtWidgets import (
-    QApplication,
-    QWidget,
-    QLabel,
-    QVBoxLayout,
-)
-
-from PyQt5.QtCore import QTimer
+from dynamixel_sdk import PortHandler
+from dynamixel_sdk import PacketHandler
+from dynamixel_sdk import GroupSyncWrite
 
 
-class NovaTeleop(Node):
+
+
+ADDR_TORQUE_ENABLE = 24
+ADDR_GOAL_POSITION = 30
+ADDR_MOVING_SPEED = 32
+ADDR_PRESENT_POSITION = 36
+
+TORQUE_ENABLE = 1
+TORQUE_DISABLE = 0
+
+# COMMUNICATION SETTINGS
+
+PROTOCOL_VERSION = 1.0
+
+PORT_NAME = "/dev/ttyACM0"
+BAUDRATE = 1000000
+
+# CONTROL TABLE
+
+# Right Side Arm
+RIGHT_JOINT_TO_ID = {
+    "right_joint1": 1,
+    "right_joint2": 2,
+    "right_joint3": 3,
+    "right_joint4": 4,
+    "right_joint5": 5,
+    "right_gripper": 6,
+}
+
+# Left Side Arm
+LEFT_JOINT_TO_ID = {
+    "left_joint1": 11,
+    "left_joint2": 12,
+    "left_joint3": 13,
+    "left_joint4": 14,
+    "left_joint5": 15,
+    "left_gripper": 16,
+}
+
+JOINT_TO_ID = {**RIGHT_JOINT_TO_ID, **LEFT_JOINT_TO_ID}
+
+# HELPERS
+
+def rad_to_dxl(rad):
+
+    deg = math.degrees(rad)
+
+    value = int(((deg + 150.0) / 300.0) * 1023.0)
+
+    return max(0, min(1023, value))
+
+
+def dxl_to_rad(value):
+
+    deg = value * 300.0 / 1023.0 - 150.0
+
+    return math.radians(deg)
+
+
+# DRIVER
+
+class ArmDriver(Node):
 
     def __init__(self):
 
-        super().__init__("nova_teleop")
+        super().__init__("arm_driver")
 
-        self.create_subscription(
-            Joy,
-            "/joy",
-            self.joy_callback,
-            10
+        self.port_handler = PortHandler(PORT_NAME)
+        self.packet_handler = PacketHandler(PROTOCOL_VERSION)
+
+        # Sync writer: batches goal positions for every motor into a
+        # single broadcast packet so both arms move on the same tick,
+        # instead of each motor being written one at a time.
+        self.group_sync_write = GroupSyncWrite(
+            self.port_handler,
+            self.packet_handler,
+            ADDR_GOAL_POSITION,
+            2,  # goal position is a 2-byte value
         )
 
-        self.publisher = self.create_publisher(
+        # CONNECT TO DYNAMIXELS
+
+        if not self.port_handler.openPort():
+            raise RuntimeError(f"Failed to open {PORT_NAME}")
+
+        if not self.port_handler.setBaudRate(BAUDRATE):
+            raise RuntimeError("Failed to set baudrate")
+
+        self.get_logger().info(
+            f"Connected to Dynamixels on {PORT_NAME}"
+        )
+
+        # ENABLE TORQUE
+
+        for dxl_id in JOINT_TO_ID.values():
+
+            dxl_comm_result, dxl_error = \
+                self.packet_handler.write1ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_TORQUE_ENABLE,
+                    TORQUE_ENABLE,
+                )
+
+            if dxl_comm_result != 0:
+                self.get_logger().error(
+                    f"Communication failed for ID {dxl_id}"
+                )
+
+            elif dxl_error != 0:
+                self.get_logger().error(
+                    f"Dynamixel error on ID {dxl_id}"
+                )
+
+            else:
+                self.get_logger().info(
+                    f"Torque enabled on ID {dxl_id}"
+                )
+
+        # SUBSCRIPTIONS
+
+        self.command_sub = self.create_subscription(
             JointState,
             "/arm_command",
-            10
+            self.command_callback,
+            10,
         )
 
-        self.save_pub = self.create_publisher(
-            String,
-            "/save_pose",
-            10
+        self.speed_sub = self.create_subscription(
+            Int32,
+            "/arm_speed",
+            self.speed_callback,
+            10,
         )
 
-        self.save_pub = self.create_publisher(
-            String,
-            "/save_pose",
-            10
-        )
-
-        # New publishers
-        self.move_pub = self.create_publisher(
-            String,
-            "/move_to_pose",
-            10
-        )
-
-        self.update_pub = self.create_publisher(
-            String,
-            "/update_pose",
-            10
-        )
-
-        self.delete_pub = self.create_publisher(
-            String,
-            "/delete_pose",
-            10
-        )
-
-        self.page = 0
-        self.fine_mode = False
-
-        self.previous_buttons = []
-
-        self.step = 0.05
-        self.fine_step = 0.01
-
-        self.joint_names = [
-            "right_joint1", "right_joint2", "right_joint3",
-            "right_joint4", "right_joint5", "right_gripper",
-            "left_joint1", "left_joint2", "left_joint3",
-            "left_joint4", "left_joint5", "left_gripper",
-        ]
-
-        self.positions = [0.0] * 12
-
-        self.axes = [0.0] * 8
-
-        self.timer = self.create_timer(
-            0.05,
-            self.publish_command
-        )
-
-        self.get_logger().info("Nova Teleop Started")
-
-    def joy_callback(self, msg):
-
-        self.axes = list(msg.axes)
-
-        if len(self.previous_buttons) == 0:
-            self.previous_buttons = [0] * len(msg.buttons)
-
-        # L1
-        if msg.buttons[4] and not self.previous_buttons[4]:
-            self.page = (self.page - 1) % 3
-
-        # R1
-        if msg.buttons[5] and not self.previous_buttons[5]:
-            self.page = (self.page + 1) % 3
-
-        # X
-        if msg.buttons[2] and not self.previous_buttons[2]:
-            self.fine_mode = not self.fine_mode
-
-        self.previous_buttons = list(msg.buttons)
-
-        step = self.fine_step if self.fine_mode else self.step
-
-        left = -msg.axes[1]
-        right = -msg.axes[3]
-
-        j1 = self.page * 2
-        j2 = j1 + 1
-
-        self.positions[j1] += left * step
-        self.positions[j2] += right * step
-    
-
-    def publish_command(self):
-
-        msg = JointState()
-
-        msg.name = self.joint_names
-        msg.position = self.positions
-
-        self.publisher.publish(msg)
-
-
-from PyQt5.QtWidgets import (
-    QWidget,
-    QLabel,
-    QVBoxLayout,
-    QPushButton,
-    QLineEdit,
-    QListWidget,
-)
-
-from std_msgs.msg import String
-
-import yaml
-import os
-
-
-class Window(QWidget):
-
-    def __init__(self, node):
-
-        super().__init__()
-
-        self.node = node
-
-        self.setWindowTitle("Nova Arm Teach Pendant")
-        self.resize(450, 600)
-
-        layout = QVBoxLayout()
-
-        ########################################################
-        # Current Pair
-        ########################################################
-
-        self.page_label = QLabel()
-        layout.addWidget(self.page_label)
-
-        self.mode_label = QLabel()
-        layout.addWidget(self.mode_label)
-
-        ########################################################
-        # Joint Values
-        ########################################################
-
-        self.labels = []
-
-        for _ in range(6):
-
-            lbl = QLabel()
-
-            layout.addWidget(lbl)
-
-            self.labels.append(lbl)
-
-
-        layout.addWidget(QLabel("Pose Name"))
-
-        self.pose_name = QLineEdit()
-
-        self.pose_name.setPlaceholderText(
-            "pickup_bag"
-        )
-
-        layout.addWidget(self.pose_name)
-
-
-        self.save_button = QPushButton(
-            "Save Pose"
-        )
-
-        self.move_button = QPushButton("Move To")
-        self.update_button = QPushButton("Update")
-        self.delete_button = QPushButton("Delete")
-
-        layout.addWidget(self.move_button)
-        layout.addWidget(self.update_button)
-        layout.addWidget(self.delete_button)
-
-        self.move_button.clicked.connect(self.move_pose)
-        self.update_button.clicked.connect(self.update_pose)
-        self.delete_button.clicked.connect(self.delete_pose)
-
-        layout.addWidget(
-            self.save_button
-        )
-
-        self.save_button.clicked.connect(
-            self.save_pose
-        )
-
-
-        # Saved Poses
-        layout.addWidget(QLabel("Saved Poses"))
-
-        self.pose_list = QListWidget()
-
-        layout.addWidget(self.pose_list)
-
-        # Load existing poses
-        self.refresh_pose_list()
-
-        layout.addWidget(
-            self.pose_list
-        )
-
-
-
-
-        self.setLayout(layout)
-
-
-        self.update_timer = QTimer()
-
-        self.update_timer.timeout.connect(
-            self.update_gui
-        )
-
-        self.update_timer.start(50)
-
-
-    def selected_pose(self):
-
-        item = self.pose_list.currentItem()
-
-        if item is None:
-            return None
-
-        return item.text()
-
-
-    def move_pose(self):
-
-        pose = self.selected_pose()
-
-        if pose is None:
-            return
-
-        msg = String()
-        msg.data = pose
-
-        self.node.move_pub.publish(msg)
-
-
-    def update_pose(self):
-
-        pose = self.selected_pose()
-
-        if pose is None:
-            return
-
-        msg = String()
-        msg.data = pose
-
-        self.node.update_pub.publish(msg)
-
-
-    def delete_pose(self):
-
-        pose = self.selected_pose()
-
-        if pose is None:
-            return
-
-        msg = String()
-        msg.data = pose
-
-        self.node.delete_pub.publish(msg)
-
-    def save_pose(self):
-
-        name = self.pose_name.text().strip()
-
-        if name == "":
-            return
-
-        msg = String()
-
-        msg.data = name
-
-        self.node.save_pub.publish(msg)
-
-
-    def refresh_pose_list(self):
-
-        pose_file = os.path.expanduser(
-            "~/nova_arm_ws/poses.yaml"
-        )
-
-        if not os.path.exists(
-            pose_file
-        ):
-            return
-
-        with open(
-            pose_file,
-            "r"
-        ) as f:
-
-            poses = yaml.safe_load(f)
-
-        self.pose_list.clear()
-
-        if poses:
-
-            for name in poses.keys():
-
-                self.pose_list.addItem(name)
-
-
-    def update_gui(self):
-
-        rclpy.spin_once(
-            self.node,
-            timeout_sec=0.0
-        )
-
-        pages = [
-            "Joint1 / Joint2",
-            "Joint3 / Joint4",
-            "Joint5 / Gripper",
-        ]
-
-        self.page_label.setText(
-            f"<h2>{pages[self.node.page]}</h2>"
-        )
-
-        mode = (
-            "Fine"
-            if self.node.fine_mode
-            else "Normal"
-        )
-
-        self.mode_label.setText(
-            f"<b>Mode:</b> {mode}"
-        )
-
-        for i, value in enumerate(
-            self.node.positions
-        ):
-
-            self.labels[i].setText(
-                f"{self.node.joint_names[i]} : {value:.3f} rad"
+    # JOINT CALLBACK
+    def command_callback(self, msg):
+        """
+        Build up one sync-write packet covering every joint in this
+        message, then send it as a single broadcast transaction so
+        all motors (both arms) receive their goal at the same time, 
+        rather than at a single time
+        """
+        queued = []
+
+        for joint_name, position_rad in zip(
+                msg.name,
+                msg.position):
+
+            if joint_name not in JOINT_TO_ID:
+
+                self.get_logger().warn(
+                    f"Unknown joint '{joint_name}'"
+                )
+
+                continue
+
+            dxl_id = JOINT_TO_ID[joint_name]
+
+            goal = rad_to_dxl(position_rad)
+
+            # Note: Dynamixel SDK wants the 2-byte goal as a little-endian
+            # byte array for sync write.
+            param_goal = [
+                goal & 0xFF,
+                (goal >> 8) & 0xFF,
+            ]
+
+            add_ok = self.group_sync_write.addParam(
+                dxl_id,
+                bytes(param_goal),
             )
+
+            if not add_ok:
+                self.get_logger().error(
+                    f"Failed to queue sync write for ID {dxl_id}"
+                )
+                continue
+
+            queued.append((joint_name, dxl_id, position_rad, goal))
+
+        if not queued:
+            return
+
+        dxl_comm_result = self.group_sync_write.txPacket()
+
+        # Always clear queued params, even on failure, so a bad
+        # transaction doesn't leak stale goals into the next cycle.
+        self.group_sync_write.clearParam()
+
+        if dxl_comm_result != 0:
+            self.get_logger().error(
+                "Sync write failed: "
+                f"{self.packet_handler.getTxRxResult(dxl_comm_result)}"
+            )
+            return
+
+        for joint_name, dxl_id, position_rad, goal in queued:
+            self.get_logger().info(
+                f"{joint_name} (ID {dxl_id}) -> "
+                f"{position_rad:.2f} rad "
+                f"({goal})"
+            )
+
+    # SPEED CALLBACK
+
+    def speed_callback(self, msg):
+
+        speed = int(msg.data / 100.0 * 1023)
+
+        speed = max(20, min(speed, 1023))
+
+        for dxl_id in JOINT_TO_ID.values():
+
+            self.packet_handler.write2ByteTxRx(
+                self.port_handler,
+                dxl_id,
+                ADDR_MOVING_SPEED,
+                speed,
+            )
+
+        self.get_logger().info(
+            f"Speed set to {msg.data}%"
+        )
+
+
+    # SHUTDOWN
+
+    def destroy_node(self):
+
+        self.get_logger().info("Disabling torque...")
+
+        for dxl_id in JOINT_TO_ID.values():
+
+            self.packet_handler.write1ByteTxRx(
+                self.port_handler,
+                dxl_id,
+                ADDR_TORQUE_ENABLE,
+                TORQUE_DISABLE,
+            )
+
+        self.port_handler.closePort()
+
+        super().destroy_node()
+
+
+# Main
 
 def main(args=None):
 
     rclpy.init(args=args)
 
-    node = NovaTeleop()
+    node = ArmDriver()
 
-    app = QApplication(sys.argv)
+    try:
+        rclpy.spin(node)
 
-    window = Window(node)
+    except KeyboardInterrupt:
+        pass
 
-    window.show()
-
-    app.exec()
-
-    node.destroy_node()
-
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":

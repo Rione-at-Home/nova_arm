@@ -15,12 +15,12 @@ the nova arm is used on both sides of the robot.
 
 ## Hardware
 
-* **Servos:** 6 × Dynamixel AX-12A
+* **Servos:** 12 × Dynamixel AX-12A
 * **Protocol:** 1.0
 * **Baudrate:** 1000000 bps
 * **Communication:** TTL Serial
 
-Current motor IDs:
+Current motor IDs for Right Arm:
 
 | Joint   | ID |
 | ------- | -: |
@@ -31,6 +31,16 @@ Current motor IDs:
 | Joint 5 |  5 |
 | Gripper |  6 |
 
+Current motor IDs for Left Arm:
+
+| Joint   | ID |
+| ------- | -: |
+| Joint 1 |  11 |
+| Joint 2 |  12 |
+| Joint 3 |  13 |
+| Joint 4 |  14 |
+| Joint 5 |  15 |
+| Gripper |  16 |
 ---
 
 ## Workspace
@@ -81,7 +91,7 @@ Example:
 
 ```bash
 ros2 topic pub --once /arm_command sensor_msgs/msg/JointState "{
-name: ['joint1','joint2','joint3','joint4','joint5','gripper'],
+name: ['right_joint1','right_joint2','right_joint3','right_joint4','right_joint5','right_gripper'],
 position: [0.0,0.5,-0.5,0.2,0.0,0.3]
 }"
 ```
@@ -111,12 +121,18 @@ The value is a percentage from **0–100%**.
 The driver recognizes the following joint names:
 
 ```
-joint1
-joint2
-joint3
-joint4
-joint5
-gripper
+right_joint1
+right_joint2
+right_joint3
+right_joint4
+right_joint5
+right_gripper
+left_joint1
+left_joint2
+left_joint3
+left_joint4
+left_joint5
+left_gripper
 ```
 
 ---

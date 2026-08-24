@@ -45,7 +45,7 @@ class PoseManager(Node):
 
         self.create_subscription(
             JointState,
-            "/arm_command",
+            "/joint_states",
             self.pose_callback,
             10
         )
@@ -84,6 +84,11 @@ class PoseManager(Node):
 
     def pose_callback(self, msg):
 
+        # This now comes from /joint_states (ArmDriver's sync-read
+        # feedback), i.e. the arm's actual measured position — not
+        # an echo of the last commanded /arm_command message. That
+        # means Save/Update below capture where the arm truly is,
+        # even if it stalled short of a commanded goal.
         self.current_pose = msg
         self.current_positions = list(msg.position)
 

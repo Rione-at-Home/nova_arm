@@ -10,6 +10,7 @@ from std_msgs.msg import Int32
 
 from dynamixel_sdk import PortHandler
 from dynamixel_sdk import PacketHandler
+from dynamixel_sdk import GroupSyncWrite
 
 
 
@@ -26,7 +27,7 @@ TORQUE_DISABLE = 0
 
 PROTOCOL_VERSION = 1.0
 
-PORT_NAME = "/dev/ttyUSB0"
+PORT_NAME = "/dev/ttyACM0"
 BAUDRATE = 1000000
 
 # CONTROL TABLE
@@ -81,6 +82,16 @@ class ArmDriver(Node):
 
         self.port_handler = PortHandler(PORT_NAME)
         self.packet_handler = PacketHandler(PROTOCOL_VERSION)
+
+        # Sync writer: batches goal positions for every motor into a
+        # single broadcast packet so both arms move on the same tick,
+        # instead of each motor being written one at a time.
+        self.group_sync_write = GroupSyncWrite(
+            self.port_handler,
+            self.packet_handler,
+            ADDR_GOAL_POSITION,
+            2,  # goal position is a 2-byte value
+        )
 
         # CONNECT TO DYNAMIXELS
 
@@ -139,6 +150,13 @@ class ArmDriver(Node):
 
     # JOINT CALLBACK
     def command_callback(self, msg):
+        """
+        Build up one sync-write packet covering every joint in this
+        message, then send it as a single broadcast transaction so
+        all motors (both arms) receive their goal at the same time, 
+        rather than at a single time
+        """
+        queued = []
 
         for joint_name, position_rad in zip(
                 msg.name,
@@ -156,33 +174,48 @@ class ArmDriver(Node):
 
             goal = rad_to_dxl(position_rad)
 
-            dxl_comm_result, dxl_error = \
-                self.packet_handler.write2ByteTxRx(
-                    self.port_handler,
-                    dxl_id,
-                    ADDR_GOAL_POSITION,
-                    goal,
-                )
+            # Note: Dynamixel SDK wants the 2-byte goal as a little-endian
+            # byte array for sync write.
+            param_goal = [
+                goal & 0xFF,
+                (goal >> 8) & 0xFF,
+            ]
 
-            if dxl_comm_result != 0:
+            add_ok = self.group_sync_write.addParam(
+                dxl_id,
+                bytes(param_goal),
+            )
 
+            if not add_ok:
                 self.get_logger().error(
-                    f"Failed sending command to ID {dxl_id}"
+                    f"Failed to queue sync write for ID {dxl_id}"
                 )
+                continue
 
-            elif dxl_error != 0:
+            queued.append((joint_name, dxl_id, position_rad, goal))
 
-                self.get_logger().error(
-                    f"Dynamixel error on ID {dxl_id}"
-                )
+        if not queued:
+            return
 
-            else:
+        dxl_comm_result = self.group_sync_write.txPacket()
 
-                self.get_logger().info(
-                    f"{joint_name} -> "
-                    f"{position_rad:.2f} rad "
-                    f"({goal})"
-                )
+        # Always clear queued params, even on failure, so a bad
+        # transaction doesn't leak stale goals into the next cycle.
+        self.group_sync_write.clearParam()
+
+        if dxl_comm_result != 0:
+            self.get_logger().error(
+                "Sync write failed: "
+                f"{self.packet_handler.getTxRxResult(dxl_comm_result)}"
+            )
+            return
+
+        for joint_name, dxl_id, position_rad, goal in queued:
+            self.get_logger().info(
+                f"{joint_name} (ID {dxl_id}) -> "
+                f"{position_rad:.2f} rad "
+                f"({goal})"
+            )
 
     # SPEED CALLBACK
 

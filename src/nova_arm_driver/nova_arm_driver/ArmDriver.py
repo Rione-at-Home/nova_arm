@@ -11,7 +11,7 @@ from std_msgs.msg import Int32
 from dynamixel_sdk import PortHandler
 from dynamixel_sdk import PacketHandler
 from dynamixel_sdk import GroupSyncWrite
-from dynamixel_sdk import GroupSyncRead
+from dynamixel_sdk import GroupBulkRead 
 
 
 
@@ -28,7 +28,7 @@ TORQUE_DISABLE = 0
 
 PROTOCOL_VERSION = 1.0
 
-PORT_NAME = "/dev/ttyUSB0"
+PORT_NAME = "/dev/ttyACM0"
 BAUDRATE = 1000000
 
 # CONTROL TABLE
@@ -102,22 +102,6 @@ class ArmDriver(Node):
             2,  # goal position is a 2-byte value
         )
 
-        # Sync reader: the read-side counterpart to the sync writer.
-        # Polls PRESENT_POSITION on every motor in one broadcast
-        # transaction, so both arms' actual state is sampled at
-        # (as close as possible to) the same instant.
-        self.group_sync_read = GroupSyncRead(
-            self.port_handler,
-            self.packet_handler,
-            ADDR_PRESENT_POSITION,
-            2,
-        )
-
-        for dxl_id in JOINT_TO_ID.values():
-            if not self.group_sync_read.addParam(dxl_id):
-                self.get_logger().error(
-                    f"Failed to add ID {dxl_id} to sync read"
-                )
 
         # Last-known position per joint (radians), used to fill in
         # /joint_states if a given motor doesn't answer on a given
@@ -269,44 +253,27 @@ class ArmDriver(Node):
     # FEEDBACK CALLBACK
     def read_callback(self):
 
-        dxl_comm_result = self.group_sync_read.txRxPacket()
-
-        if dxl_comm_result != 0:
-            self.get_logger().error(
-                "Sync read failed: "
-                f"{self.packet_handler.getTxRxResult(dxl_comm_result)}"
-            )
-            # Don't publish stale/garbage data on a failed poll;
-            # last_known_positions will be reused next cycle.
-            return
-
         positions = []
 
         for joint_name in JOINT_ORDER:
 
             dxl_id = JOINT_TO_ID[joint_name]
 
-            if self.group_sync_read.isAvailable(
-                    dxl_id, ADDR_PRESENT_POSITION, 2):
-
-                raw = self.group_sync_read.getData(
-                    dxl_id, ADDR_PRESENT_POSITION, 2
+            raw, dxl_comm_result, dxl_error = \
+                self.packet_handler.read2ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_PRESENT_POSITION,
                 )
 
-                rad = dxl_to_rad(raw)
-                self.last_known_positions[joint_name] = rad
-
-            else:
-                # This motor didn't answer this cycle (bus noise,
-                # timing, etc). Fall back to its last known value
-                # rather than dropping it from the message, which
-                # would desync /joint_states' array length from
-                # JOINT_ORDER.
+            if dxl_comm_result != 0 or dxl_error != 0:
                 self.get_logger().warn(
-                    f"No feedback for ID {dxl_id} "
-                    f"({joint_name}) this cycle"
+                    f"No feedback for ID {dxl_id} ({joint_name}) this cycle"
                 )
                 rad = self.last_known_positions[joint_name]
+            else:
+                rad = dxl_to_rad(raw)
+                self.last_known_positions[joint_name] = rad
 
             positions.append(rad)
 

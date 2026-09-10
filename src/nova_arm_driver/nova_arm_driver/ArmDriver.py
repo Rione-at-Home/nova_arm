@@ -259,12 +259,23 @@ class ArmDriver(Node):
 
             dxl_id = JOINT_TO_ID[joint_name]
 
-            raw, dxl_comm_result, dxl_error = \
-                self.packet_handler.read2ByteTxRx(
-                    self.port_handler,
-                    dxl_id,
-                    ADDR_PRESENT_POSITION,
+            try:
+                raw, dxl_comm_result, dxl_error = \
+                    self.packet_handler.read2ByteTxRx(
+                        self.port_handler,
+                        dxl_id,
+                        ADDR_PRESENT_POSITION,
+                    )
+            except IndexError:
+                # dynamixel_sdk bug: a corrupted/truncated status packet
+                # can report COMM_SUCCESS while the payload is short,
+                # causing an IndexError inside the SDK itself. Treat it
+                # the same as any other comm failure for this cycle.
+                self.get_logger().warn(
+                    f"Corrupted packet from ID {dxl_id} ({joint_name}) this cycle"
                 )
+                positions.append(self.last_known_positions[joint_name])
+                continue
 
             if dxl_comm_result != 0 or dxl_error != 0:
                 self.get_logger().warn(

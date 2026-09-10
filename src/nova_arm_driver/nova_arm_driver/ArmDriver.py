@@ -103,12 +103,6 @@ class ArmDriver(Node):
         )
 
 
-        self.group_bulk_read = GroupBulkRead(self.port_handler, self.packet_handler)
-
-        for dxl_id in JOINT_TO_ID.values():
-            if not self.group_bulk_read.addParam(dxl_id, ADDR_PRESENT_POSITION, 2):
-                self.get_logger().error(f"Failed to add ID {dxl_id} to bulk read")
-
         # Last-known position per joint (radians), used to fill in
         # /joint_states if a given motor doesn't answer on a given
         # poll, so a single dropout doesn't collapse the whole message.
@@ -258,27 +252,30 @@ class ArmDriver(Node):
 
     # FEEDBACK CALLBACK
     def read_callback(self):
-        dxl_comm_result = self.group_bulk_read.txRxPacket()
-
-        if dxl_comm_result != 0:
-            self.get_logger().error(
-                "Bulk read failed: "
-                f"{self.packet_handler.getTxRxResult(dxl_comm_result)}"
-            )
-            return
 
         positions = []
+
         for joint_name in JOINT_ORDER:
+
             dxl_id = JOINT_TO_ID[joint_name]
-            if self.group_bulk_read.isAvailable(dxl_id, ADDR_PRESENT_POSITION, 2):
-                raw = self.group_bulk_read.getData(dxl_id, ADDR_PRESENT_POSITION, 2)
+
+            raw, dxl_comm_result, dxl_error = \
+                self.packet_handler.read2ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_PRESENT_POSITION,
+                )
+
+            if dxl_comm_result != 0 or dxl_error != 0:
+                self.get_logger().warn(
+                    f"No feedback for ID {dxl_id} ({joint_name}) this cycle"
+                )
+                rad = self.last_known_positions[joint_name]
+            else:
                 rad = dxl_to_rad(raw)
                 self.last_known_positions[joint_name] = rad
-            else:
-                self.get_logger().warn(f"No feedback for ID {dxl_id} ({joint_name}) this cycle")
-                rad = self.last_known_positions[joint_name]
+
             positions.append(rad)
-        
 
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()

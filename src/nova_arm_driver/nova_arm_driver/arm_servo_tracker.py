@@ -1,6 +1,11 @@
+
 #!/usr/bin/env python3
 """
 Simple desktop GUI for tracking per-servo status/notes across both arms.
+
+This GUI is intended to show the current state of the arms and allow you to make notes, but it does
+not communicate with the arms or servos in any way. It is purely a local log. The information 
+stored is the servo ID, joint name, status (ok/warn/offline), torque limit, and any notes you want to add.
 
 Persists to a local JSON file (arm_servo_log.json, next to this script by
 default) so your notes survive closing and reopening the app. No external
@@ -17,7 +22,8 @@ import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 
-STORAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arm_servo_log.json")
+STORAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arm_servo_log")
+ARM_FILENAMES = {"right": "right.json", "left": "left.json"}
 
 STATUS_OPTIONS = ["ok", "warn", "offline"]
 STATUS_LABELS = {"ok": "OK", "warn": "Needs attention", "offline": "Offline"}
@@ -78,36 +84,62 @@ def default_arms():
     }
 
 
-def load_arms():
-    """Load persisted data, falling back to defaults on any problem
-    (missing file, corrupt JSON, unexpected shape)."""
+def _arm_path(arm_key):
+    return os.path.join(STORAGE_DIR, ARM_FILENAMES[arm_key])
 
-    if not os.path.exists(STORAGE_PATH):
-        return default_arms()
+
+def load_arms():
+    """Load persisted data from arm_servo_log/right.json and
+    arm_servo_log/left.json. Falls back to defaults per-arm on any
+    problem (missing folder/file, corrupt JSON, unexpected shape) --
+    so a bad file for one arm doesn't wipe out the other arm's log."""
+
+    defaults = default_arms()
+    arms = {}
+
+    for arm_key in ("right", "left"):
+        path = _arm_path(arm_key)
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            if "servos" in data:
+                arms[arm_key] = data
+                continue
+        except (json.JSONDecodeError, OSError, KeyError):
+            pass
+
+        arms[arm_key] = defaults[arm_key]
+
+    return arms
+
+
+def save_arm(arm_key, arm_data):
+    """Write one arm's data to its own file inside the storage folder.
+    Writes to a temp file then renames, so a crash mid-write can't
+    corrupt the existing log for that arm."""
 
     try:
-        with open(STORAGE_PATH, "r") as f:
-            data = json.load(f)
-        if "right" in data and "left" in data:
-            return data
-    except (json.JSONDecodeError, OSError, KeyError):
-        pass
+        os.makedirs(STORAGE_DIR, exist_ok=True)
+    except OSError:
+        return False
 
-    return default_arms()
-
-
-def save_arms(arms):
-    """Write to a temp file then rename, so a crash mid-write can't
-    corrupt the existing log."""
-
-    tmp_path = STORAGE_PATH + ".tmp"
+    path = _arm_path(arm_key)
+    tmp_path = path + ".tmp"
     try:
         with open(tmp_path, "w") as f:
-            json.dump(arms, f, indent=2)
-        os.replace(tmp_path, STORAGE_PATH)
+            json.dump(arm_data, f, indent=2)
+        os.replace(tmp_path, path)
         return True
     except OSError:
         return False
+
+
+def save_arms(arms):
+    """Save both arms. Returns True only if both writes succeeded."""
+
+    right_ok = save_arm("right", arms["right"])
+    left_ok = save_arm("left", arms["left"])
+    return right_ok and left_ok
 
 
 def format_timestamp(iso_str):
@@ -218,8 +250,9 @@ class ServoRow(ttk.Frame):
 class ArmPanel(ttk.Frame):
     """One arm's panel: header (port/supply/notes) plus its 6 servo rows."""
 
-    def __init__(self, parent, arm_data, on_change, **kwargs):
+    def __init__(self, parent, arm_key, arm_data, on_change, **kwargs):
         super().__init__(parent, style="Panel.TFrame", **kwargs)
+        self.arm_key = arm_key
         self.arm_data = arm_data
         self.on_change = on_change
 
@@ -251,7 +284,7 @@ class ArmPanel(ttk.Frame):
         rows_frame = tk.Frame(self, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
         rows_frame.pack(fill="x", padx=12)
         for servo in arm_data["servos"]:
-            row = ServoRow(rows_frame, servo, on_change)
+            row = ServoRow(rows_frame, servo, lambda: on_change(arm_key))
             row.pack(fill="x")
 
         note_frame = tk.Frame(self, bg=PANEL)
@@ -272,7 +305,7 @@ class ArmPanel(ttk.Frame):
 
     def _on_field_change(self, field, value):
         self.arm_data[field] = value
-        self.on_change()
+        self.on_change(self.arm_key)
 
 
 class App(tk.Tk):
@@ -291,22 +324,24 @@ class App(tk.Tk):
         )
 
         self.arms = load_arms()
-        self._save_job = None
+        self._save_jobs = {"right": None, "left": None}
 
         self._build_header()
+        self._build_content()
 
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _build_content(self):
         content = tk.Frame(self, bg=BG)
         content.pack(fill="both", expand=True, padx=16, pady=(4, 16))
         content.columnconfigure(0, weight=1)
         content.columnconfigure(1, weight=1)
 
-        self.right_panel = ArmPanel(content, self.arms["right"], self._schedule_save)
+        self.right_panel = ArmPanel(content, "right", self.arms["right"], self._schedule_save)
         self.right_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
-        self.left_panel = ArmPanel(content, self.arms["left"], self._schedule_save)
+        self.left_panel = ArmPanel(content, "left", self.arms["left"], self._schedule_save)
         self.left_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_header(self):
         header = tk.Frame(self, bg=BG)
@@ -337,40 +372,42 @@ class App(tk.Tk):
         )
         reset_btn.pack(side="left")
 
-    def _schedule_save(self):
+    def _schedule_save(self, arm_key):
         self.save_status_label.config(text="Saving…", fg=MUTED)
-        if self._save_job is not None:
-            self.after_cancel(self._save_job)
-        self._save_job = self.after(AUTOSAVE_DELAY_MS, self._save_now)
+        existing_job = self._save_jobs.get(arm_key)
+        if existing_job is not None:
+            self.after_cancel(existing_job)
+        self._save_jobs[arm_key] = self.after(
+            AUTOSAVE_DELAY_MS, lambda: self._save_now(arm_key)
+        )
 
-    def _save_now(self):
-        ok = save_arms(self.arms)
+    def _save_now(self, arm_key):
+        ok = save_arm(arm_key, self.arms[arm_key])
         if ok:
             self.save_status_label.config(text="Saved", fg=MUTED)
         else:
             self.save_status_label.config(text="Save failed", fg=STATUS_COLORS["offline"])
-        self._save_job = None
+        self._save_jobs[arm_key] = None
 
     def _on_reset(self):
+        for job in self._save_jobs.values():
+            if job is not None:
+                self.after_cancel(job)
+        self._save_jobs = {"right": None, "left": None}
+
         self.arms = default_arms()
         save_arms(self.arms)
+
         # Simplest reliable way to reflect the reset in the UI: rebuild.
         for widget in self.winfo_children():
             widget.destroy()
-        self._save_job = None
         self._build_header()
-        content = tk.Frame(self, bg=BG)
-        content.pack(fill="both", expand=True, padx=16, pady=(4, 16))
-        content.columnconfigure(0, weight=1)
-        content.columnconfigure(1, weight=1)
-        self.right_panel = ArmPanel(content, self.arms["right"], self._schedule_save)
-        self.right_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        self.left_panel = ArmPanel(content, self.arms["left"], self._schedule_save)
-        self.left_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self._build_content()
 
     def _on_close(self):
-        if self._save_job is not None:
-            self.after_cancel(self._save_job)
+        for job in self._save_jobs.values():
+            if job is not None:
+                self.after_cancel(job)
         save_arms(self.arms)
         self.destroy()
 

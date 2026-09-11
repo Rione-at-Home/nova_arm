@@ -1,11 +1,11 @@
 """
-Launch file for arm_driver_pkg.
+Launch file for nova_arm_driver.
 
 Exposes right_port / left_port / baudrate as launch arguments so the
 udev-mapped serial device paths can be overridden per-machine without
 editing code, e.g.:
 
-    ros2 launch arm_driver_pkg arm_driver.launch.py \\
+    ros2 launch nova_arm_driver arm_driver.launch.py \\
         right_port:=/dev/dxl_right left_port:=/dev/dxl_left
 """
 
@@ -48,7 +48,7 @@ def generate_launch_description():
     )
 
     arm_driver_node = Node(
-        package="arm_driver_pkg",
+        package="nova_arm_driver",
         executable="arm_driver",
         name="arm_driver",
         output="screen",

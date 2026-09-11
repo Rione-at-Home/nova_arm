@@ -13,7 +13,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Int32
 
-from arm_driver_pkg.arm_bus import ArmBus
+from nova_arm_driver.ArmBus import ArmBus
 
 
 # Right side arm

@@ -1,4 +1,4 @@
-# arm_driver_pkg
+# nova_arm_driver
 
 ROS 2 driver for a dual-arm AX-12A setup, one independent USB2Dynamixel
 bus per arm. See the electrical-setup issue for wiring/power details
@@ -11,10 +11,10 @@ OpenCR driver -- this package only changes what's underneath them.
 ## Package layout
 
 ```
-arm_driver_pkg/
-  arm_driver_pkg/
-    arm_bus.py          # ArmBus: one independent DYNAMIXEL bus (one arm)
-    arm_driver_node.py  # ArmDriver node: owns two ArmBus instances
+nova_arm_driver/
+  nova_arm_driver/
+    ArmBus.py     # ArmBus: one independent DYNAMIXEL bus (one arm)
+    ArmDriver.py  # ArmDriver node: owns two ArmBus instances
   launch/
     arm_driver.launch.py
   package.xml
@@ -31,13 +31,13 @@ each USB2Dynamixel's serial number instead:
 
 1. Plug in one USB2Dynamixel at a time and find its serial number:
    ```
-   
+   udevadm info -a -n /dev/ttyUSB0 | grep serial
    ```
-2. Create the file or modify the `/etc/udev/rules.d/99-dxl-arms.rules`:
+2. Create or edit the rules file:
    ```
-   sudo nano /etc/udev/rules.d/99-dynamixel.rules
+   sudo nano /etc/udev/rules.d/99-dxl-arms.rules
    ```
-3. Add rules to `/etc/udev/rules.d/99-dxl-arms.rules`:
+3. Add these two lines, one per arm:
    ```
    SUBSYSTEM=="tty", ATTRS{serial}=="<RIGHT_ARM_SERIAL>", SYMLINK+="dxl_right"
    SUBSYSTEM=="tty", ATTRS{serial}=="<LEFT_ARM_SERIAL>", SYMLINK+="dxl_left"
@@ -60,21 +60,21 @@ needed.
 From your ROS 2 workspace root:
 
 ```
-colcon build --packages-select arm_driver_pkg
+colcon build --packages-select nova_arm_driver
 source install/setup.bash
 ```
 
 ## Run
 
 ```
-ros2 launch arm_driver_pkg arm_driver.launch.py
+ros2 launch nova_arm_driver arm_driver.launch.py
 ```
 
 Override ports if you haven't set up udev symlinks yet (not
 recommended for regular use, only for quick bench testing):
 
 ```
-ros2 launch arm_driver_pkg arm_driver.launch.py \
+ros2 launch nova_arm_driver arm_driver.launch.py \
     right_port:=/dev/ttyUSB0 left_port:=/dev/ttyUSB1
 ```
 

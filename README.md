@@ -1,14 +1,51 @@
-# nova_arm_driver
+# Nova Arm Driver
 
-ROS 2 driver for a dual-arm AX-12A setup, one independent USB2Dynamixel
-bus per arm. See the electrical-setup issue for wiring/power details
-(each arm has its own USB2Dynamixel + SMPS2Dynamixel + power supply,
-fully isolated from the other arm).
+ROS 2 driver for a dual-arm AX-12A manipulator, redesigned from the original single-bus OpenCR architecture to use **independent DYNAMIXEL communication buses for each arm**.
 
-External topic contracts are unchanged from the original single-bus
-OpenCR driver -- this package only changes what's underneath them.
+### Project Overview
+
+The Nova Arm is a custom dual-arm manipulator used by the Ritsumeikan Ri-One@Home team. This driver provides a unified ROS 2 interface for controlling and monitoring both arms while keeping their underlying communication buses electrically and logically independent.
+
+The driver was refactored to support the robot's revised hardware architecture:
+
+* One USB2Dynamixel interface per arm
+* Independent serial/packet handlers and sync-write buffers
+* Persistent udev device names for reliable arm identification
+* A shared ROS 2 interface preserved from the original driver
+* Per-arm communication failure isolation
+* Measured joint-state feedback at 50 Hz
+
+The main architectural change is the separation of **arm-level control from per-arm DYNAMIXEL bus communication**. `ArmDriver` coordinates the two arms, while `ArmBus` encapsulates communication with one physical arm.
+
+### Architecture
+
+```text
+                    ROS 2
+                      │
+          ┌───────────┴───────────┐
+          │      ArmDriver        │
+          │  /arm_command         │
+          │  /arm_speed           │
+          │  /joint_states        │
+          └───────────┬───────────┘
+                      │
+             ┌────────┴────────┐
+             │                 │
+        ArmBus (right)    ArmBus (left)
+             │                 │
+       USB2Dynamixel       USB2Dynamixel
+             │                 │
+        Right Arm           Left Arm
+```
+
+The existing ROS 2 topic interface remains unchanged, so higher-level nodes do not need to know that communication is now split across two independent buses.
+
+---
 
 ## Package layout
+
+...
+
 
 ```
 nova_arm_driver/

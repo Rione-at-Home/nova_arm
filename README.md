@@ -31,18 +31,22 @@ each USB2Dynamixel's serial number instead:
 
 1. Plug in one USB2Dynamixel at a time and find its serial number:
    ```
-   udevadm info -a -n /dev/ttyUSB0 | grep serial
+   
    ```
-2. Add rules to `/etc/udev/rules.d/99-dxl-arms.rules`:
+2. Create the file or modify the `/etc/udev/rules.d/99-dxl-arms.rules`:
+   ```
+   sudo nano /etc/udev/rules.d/99-dynamixel.rules
+   ```
+3. Add rules to `/etc/udev/rules.d/99-dxl-arms.rules`:
    ```
    SUBSYSTEM=="tty", ATTRS{serial}=="<RIGHT_ARM_SERIAL>", SYMLINK+="dxl_right"
    SUBSYSTEM=="tty", ATTRS{serial}=="<LEFT_ARM_SERIAL>", SYMLINK+="dxl_left"
    ```
-3. Reload rules:
+4. Reload rules:
    ```
    sudo udevadm control --reload-rules && sudo udevadm trigger
    ```
-4. Confirm both symlinks exist:
+5. Confirm both symlinks exist:
    ```
    ls -l /dev/dxl_right /dev/dxl_left
    ```

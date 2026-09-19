@@ -31,7 +31,7 @@ setup(
             'qr_trigger = nova_arm_driver.qr_trigger:main',
             'HeadDriver = nova_arm_driver.head_driver:main',
             'presenter_coordinator = nova_arm_driver.presentor_coordinator:main',
-            'HeadNode = nova_arm_driver.head_node:main',
+            'HeadNode = nova_arm_driver.HeadNode:main',
         ],
     },
 )

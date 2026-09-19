@@ -1,6 +1,6 @@
 # Nova Arm Driver
 
-ROS 2 driver for a dual-arm AX-12A manipulator, redesigned from the original single-bus OpenCR architecture to use **independent DYNAMIXEL communication buses for each arm**.
+ROS 2 driver for a dual-arm AX-12A manipulator, redesigned from the original single-bus OpenCR architecture to use **independent DYNAMIXEL communication buses for each arm**. This version is located in the dual-arm-setup branch.
 
 ### Project Overview
 

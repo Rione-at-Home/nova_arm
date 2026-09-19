@@ -30,6 +30,10 @@ setup(
             'nova_teleop = nova_arm_driver.nova_teleop:main',
             'nova_pose_manager = nova_arm_driver.nova_pose_manager:main',
             'nova_demo = nova_arm_driver.nova_demo:main',
+            'qr_trigger = nova_arm_driver.qr_trigger:main',
+            'HeadDriver = nova_arm_driver.head_driver:main',
+            'presenter_coordinator = nova_arm_driver.presentor_coordinator:main',
+            'HeadNode = nova_arm_driver.HeadNode:main',
         ],
     },
 )

@@ -28,6 +28,7 @@ setup(
             'nova_teleop = nova_arm_driver.nova_teleop:main',
             'nova_pose_manager = nova_arm_driver.nova_pose_manager:main',
             'nova_demo = nova_arm_driver.nova_demo:main',
+            'qr_trigger = nova_arm_driver.qr_trigger:main',
         ],
     },
 )

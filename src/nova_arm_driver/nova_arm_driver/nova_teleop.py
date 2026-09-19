@@ -2,8 +2,6 @@
 
 import sys
 
-from torch import layout
-
 import rclpy
 from rclpy.node import Node
 
@@ -45,12 +43,6 @@ class NovaTeleop(Node):
             10
         )
 
-        self.save_pub = self.create_publisher(
-            String,
-            "/save_pose",
-            10
-        )
-
         # New publishers
         self.move_pub = self.create_publisher(
             String,
@@ -78,16 +70,14 @@ class NovaTeleop(Node):
         self.step = 0.05
         self.fine_step = 0.01
 
-        self.positions = [0.0] * 6
-
         self.joint_names = [
-            "joint1",
-            "joint2",
-            "joint3",
-            "joint4",
-            "joint5",
-            "gripper",
+            "right_joint1", "right_joint2", "right_joint3",
+            "right_joint4", "right_joint5", "right_gripper",
+            "left_joint1", "left_joint2", "left_joint3",
+            "left_joint4", "left_joint5", "left_gripper",
         ]
+
+        self.positions = [0.0] * 12
 
         self.axes = [0.0] * 8
 
@@ -107,11 +97,11 @@ class NovaTeleop(Node):
 
         # L1
         if msg.buttons[4] and not self.previous_buttons[4]:
-            self.page = (self.page - 1) % 3
+            self.page = (self.page - 1) % 6
 
         # R1
         if msg.buttons[5] and not self.previous_buttons[5]:
-            self.page = (self.page + 1) % 3
+            self.page = (self.page + 1) % 6
 
         # X
         if msg.buttons[2] and not self.previous_buttons[2]:
@@ -356,9 +346,12 @@ class Window(QWidget):
         )
 
         pages = [
-            "Joint1 / Joint2",
-            "Joint3 / Joint4",
-            "Joint5 / Gripper",
+            "Right: Joint1 / Joint2",
+            "Right: Joint3 / Joint4",
+            "Right: Joint5 / Gripper",
+            "Left: Joint1 / Joint2",
+            "Left: Joint3 / Joint4",
+            "Left: Joint5 / Gripper",
         ]
 
         self.page_label.setText(

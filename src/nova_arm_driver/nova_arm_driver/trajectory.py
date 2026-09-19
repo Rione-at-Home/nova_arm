@@ -5,6 +5,7 @@ import rclpy
 
 from scipy.interpolate import CubicSpline
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 
 
 class TrajectoryPlanner:
@@ -21,8 +22,37 @@ class TrajectoryPlanner:
             10
         )
 
+        # E-stop: latches True the moment a stop is requested.
+        # Checked every cycle inside execute_segment so a fault can
+        # halt an in-progress two-arm motion immediately, rather
+        # than letting the current spline run to completion.
+        self.estop_triggered = False
+
+        self.estop_sub = node.create_subscription(
+            Bool,
+            "/estop",
+            self.estop_callback,
+            10
+        )
+
         self.active_spline = None
         self.total_duration = 0.0
+
+    def estop_callback(self, msg):
+
+        if msg.data and not self.estop_triggered:
+            self.node.get_logger().error(
+                "E-STOP received - aborting trajectory execution"
+            )
+
+        self.estop_triggered = bool(msg.data)
+
+    def reset_estop(self):
+
+        # Explicit, separate call so clearing an e-stop is always a
+        # deliberate action, never an accidental side effect of
+        # starting the next segment.
+        self.estop_triggered = False
 
     def prepare_segment(
         self,
@@ -78,6 +108,13 @@ class TrajectoryPlanner:
         start_nano = self.node.get_clock().now().nanoseconds
 
         while rclpy.ok():
+
+            if self.estop_triggered:
+                self.node.get_logger().error(
+                    "Segment aborted: E-STOP active"
+                )
+                return False
+
             now_nano = self.node.get_clock().now().nanoseconds
             elapsed_sec = (now_nano - start_nano) / 1e9
 
@@ -85,7 +122,11 @@ class TrajectoryPlanner:
                 # Final position publish
                 final_pos = self.poses[sequence_subset[-1]]["positions"]
                 self.publish(final_pos)
-                time.sleep(dt)
+                # spin_once (not a blind sleep) so any pending
+                # callback - e-stop, joint_states feedback, future
+                # subscriptions - gets a chance to run during the
+                # wait, instead of being silently deferred.
+                rclpy.spin_once(self.node, timeout_sec=dt)
                 break
             
             # Evaluate spline at exact current timestamp
@@ -94,5 +135,7 @@ class TrajectoryPlanner:
             self.publish(
                 current_positions
             )
-                        
-            time.sleep(dt)
+
+            rclpy.spin_once(self.node, timeout_sec=dt)
+
+        return True

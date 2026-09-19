@@ -49,6 +49,27 @@ class NovaDemoPrecision(Node):
         self.speed_pub.publish(msg)
         time.sleep(0.1)
 
+    def spin_wait(self, duration_sec, dt=0.02):
+        # spin_once instead of a
+        # blind sleep, so e-stop (and anything else) is still live
+        # during dwell periods like a grasp/release pause, not just
+        # during active motion.
+        start_nano = self.get_clock().now().nanoseconds
+
+        while rclpy.ok():
+            elapsed_sec = (
+                self.get_clock().now().nanoseconds - start_nano
+            ) / 1e9
+
+            if elapsed_sec >= duration_sec:
+                break
+
+            if self.planner.estop_triggered:
+                return False
+
+            rclpy.spin_once(self, timeout_sec=dt)
+
+        return True
 
    
     def run_full_mission(self):
@@ -59,37 +80,57 @@ class NovaDemoPrecision(Node):
             "Phase A: Moving to target bag..."
         )
 
-        self.planner.execute_segment(
+        if not self.planner.execute_segment(
             ["home", "ready", "approach", "grasp"]
-        )
+        ):
+            self.get_logger().error(
+                "Mission aborted during Phase A"
+            )
+            return
 
         self.get_logger().info(
             "Grasping object..."
         )
 
-        time.sleep(1.0)
+        if not self.spin_wait(1.0):
+            self.get_logger().error(
+                "Mission aborted during grasp dwell"
+            )
+            return
 
         self.get_logger().info(
             "Phase B: Carrying object..."
         )
 
-        self.planner.execute_segment(
+        if not self.planner.execute_segment(
             ["grasp", "carry", "place"]
-        )
+        ):
+            self.get_logger().error(
+                "Mission aborted during Phase B"
+            )
+            return
 
         self.get_logger().info(
             "Releasing object..."
         )
 
-        time.sleep(1.0)
+        if not self.spin_wait(1.0):
+            self.get_logger().error(
+                "Mission aborted during release dwell"
+            )
+            return
 
         self.get_logger().info(
             "Phase C: Returning Home..."
         )
 
-        self.planner.execute_segment(
+        if not self.planner.execute_segment(
             ["place", "home"]
-        )
+        ):
+            self.get_logger().error(
+                "Mission aborted during Phase C"
+            )
+            return
 
         self.get_logger().info(
             "Mission Completed Successfully!"

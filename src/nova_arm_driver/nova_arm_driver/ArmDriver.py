@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
-"""
-ArmDriver node: coordinates two independent DYNAMIXEL buses (one per
-physical arm, each on its own USB2Dynamixel) behind the same
-/arm_command, /arm_speed, /joint_states topics used previously with the
-single-bus OpenCR setup. External topic contracts are unchanged -- this
-is an internal refactor from one shared bus to two independent ones.
-"""
+
+import math
 
 import rclpy
 from rclpy.node import Node
@@ -13,40 +8,58 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Int32
 
-from nova_arm_driver.ArmBus import ArmBus
+from dynamixel_sdk import PortHandler
+from dynamixel_sdk import PacketHandler
 
 
-# Right side arm
-RIGHT_JOINT_TO_ID = {
-    "right_joint1": 1,
-    "right_joint2": 2,
-    "right_joint3": 3,
-    "right_joint4": 4,
-    "right_joint5": 5,
-    "right_gripper": 6,
+
+
+ADDR_TORQUE_ENABLE = 24
+ADDR_GOAL_POSITION = 30
+ADDR_MOVING_SPEED = 32
+ADDR_PRESENT_POSITION = 36
+
+TORQUE_ENABLE = 1
+TORQUE_DISABLE = 0
+
+# COMMUNICATION SETTINGS
+
+PROTOCOL_VERSION = 1.0
+
+PORT_NAME = "/dev/ttyUSB1"
+BAUDRATE = 1000000
+
+# CONTROL TABLE
+
+JOINT_TO_ID = {
+    "joint1": 1,
+    "joint2": 2,
+    "joint3": 3,
+    "joint4": 4,
+    "joint5": 5,
+    "gripper": 6,
 }
 
-# Left side arm
-LEFT_JOINT_TO_ID = {
-    "left_joint1": 11,
-    "left_joint2": 12,
-    "left_joint3": 13,
-    "left_joint4": 14,
-    "left_joint5": 15,
-    "left_gripper": 16,
-}
 
-# Fixed ordering used for /joint_states so consumers always get a
-# consistent, predictable array layout across both arms.
-JOINT_ORDER = list(RIGHT_JOINT_TO_ID.keys()) + list(LEFT_JOINT_TO_ID.keys())
+# HELPERS
 
-DEFAULT_RIGHT_PORT = "/dev/dxl_right"
-DEFAULT_LEFT_PORT = "/dev/dxl_left"
-DEFAULT_BAUDRATE = 1000000
+def rad_to_dxl(rad):
 
-# How often to poll actual motor positions and publish /joint_states.
-FEEDBACK_PERIOD_SEC = 0.02
+    deg = math.degrees(rad)
 
+    value = int(((deg + 150.0) / 300.0) * 1023.0)
+
+    return max(0, min(1023, value))
+
+
+def dxl_to_rad(value):
+
+    deg = value * 300.0 / 1023.0 - 150.0
+
+    return math.radians(deg)
+
+
+# DRIVER
 
 class ArmDriver(Node):
 
@@ -54,63 +67,50 @@ class ArmDriver(Node):
 
         super().__init__("arm_driver")
 
-        # PARAMETERS
-        #
-        # Ports are declared as parameters (not hardcoded constants) so
-        # they can be overridden per-machine via launch file / YAML
-        # without touching code -- useful now that there are two ports
-        # instead of one, and their /dev names depend on the udev rules
-        # set up on whatever machine is running this node.
-        self.declare_parameter("right_port", DEFAULT_RIGHT_PORT)
-        self.declare_parameter("left_port", DEFAULT_LEFT_PORT)
-        self.declare_parameter("baudrate", DEFAULT_BAUDRATE)
+        self.port_handler = PortHandler(PORT_NAME)
+        self.packet_handler = PacketHandler(PROTOCOL_VERSION)
 
-        right_port = self.get_parameter("right_port").value
-        left_port = self.get_parameter("left_port").value
-        baudrate = self.get_parameter("baudrate").value
+        # CONNECT TO DYNAMIXELS
 
-        # ARM BUSES
-        #
-        # One ArmBus per physical arm. Each owns its own port handler,
-        # packet handler, and sync-write buffer -- there is no shared
-        # bus state between them, matching the isolated per-arm
-        # electrical setup (independent USB2Dynamixel + SMPS2Dynamixel
-        # + power supply per arm).
-        self.right_bus = ArmBus(
-            "right", right_port, RIGHT_JOINT_TO_ID, baudrate,
-            self.get_logger(),
+        if not self.port_handler.openPort():
+            raise RuntimeError(f"Failed to open {PORT_NAME}")
+
+        if not self.port_handler.setBaudRate(BAUDRATE):
+            raise RuntimeError("Failed to set baudrate")
+
+        self.get_logger().info(
+            f"Connected to Dynamixels on {PORT_NAME}"
         )
-        self.left_bus = ArmBus(
-            "left", left_port, LEFT_JOINT_TO_ID, baudrate,
-            self.get_logger(),
-        )
-        self.buses = [self.right_bus, self.left_bus]
-
-        # Lookup from joint name -> owning bus, used to route incoming
-        # commands to the correct arm without the node needing to know
-        # ahead of time which arm a given joint belongs to.
-        self.joint_to_bus = {}
-        for bus in self.buses:
-            for joint_name in bus.joint_to_id:
-                self.joint_to_bus[joint_name] = bus
-
-        # CONNECT
-        #
-        # Each bus connects independently. A failure on one arm's port
-        # does not prevent the other arm from coming up -- it's logged
-        # and that bus is left disconnected rather than raising and
-        # killing the whole node.
-        for bus in self.buses:
-            try:
-                bus.connect()
-            except RuntimeError as exc:
-                self.get_logger().error(str(exc))
 
         # ENABLE TORQUE
-        for bus in self.buses:
-            bus.enable_torque()
+
+        for dxl_id in JOINT_TO_ID.values():
+
+            dxl_comm_result, dxl_error = \
+                self.packet_handler.write1ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_TORQUE_ENABLE,
+                    TORQUE_ENABLE,
+                )
+
+            if dxl_comm_result != 0:
+                self.get_logger().error(
+                    f"Communication failed for ID {dxl_id}"
+                )
+
+            elif dxl_error != 0:
+                self.get_logger().error(
+                    f"Dynamixel error on ID {dxl_id}"
+                )
+
+            else:
+                self.get_logger().info(
+                    f"Torque enabled on ID {dxl_id}"
+                )
 
         # SUBSCRIPTIONS
+
         self.command_sub = self.create_subscription(
             JointState,
             "/arm_command",
@@ -125,96 +125,96 @@ class ArmDriver(Node):
             10,
         )
 
-        # FEEDBACK
-        #
-        # /joint_states carries the arm's ACTUAL measured position, as
-        # opposed to /arm_command which is only ever what was asked
-        # for. Anything that needs to know where the arm really is
-        # (pose saving, monitoring, future collision checks) should
-        # subscribe here, not to /arm_command.
-        self.joint_state_pub = self.create_publisher(
-            JointState,
-            "/joint_states",
-            10,
-        )
-
-        self.feedback_timer = self.create_timer(
-            FEEDBACK_PERIOD_SEC,
-            self.read_callback,
-        )
-
-    # COMMAND CALLBACK
+    # JOINT CALLBACK
     def command_callback(self, msg):
 
-        # Route each joint's goal to its owning bus's sync-write
-        # buffer. Both arms' packets get flushed back-to-back at the
-        # end of this callback, on the same node tick -- this keeps
-        # both arms moving as close to the same instant as possible
-        # without needing a separate coordinator node/topic hop in
-        # between.
-        queued_any = {bus.name: False for bus in self.buses}
+        for joint_name, position_rad in zip(
+                msg.name,
+                msg.position):
 
-        for joint_name, position_rad in zip(msg.name, msg.position):
+            if joint_name not in JOINT_TO_ID:
 
-            bus = self.joint_to_bus.get(joint_name)
-
-            if bus is None:
                 self.get_logger().warn(
                     f"Unknown joint '{joint_name}'"
                 )
+
                 continue
 
-            if bus.queue_goal(joint_name, position_rad):
-                queued_any[bus.name] = True
-                self.get_logger().info(
-                    f"{joint_name} ({bus.name}) -> {position_rad:.2f} rad"
+            dxl_id = JOINT_TO_ID[joint_name]
+
+            goal = rad_to_dxl(position_rad)
+
+            dxl_comm_result, dxl_error = \
+                self.packet_handler.write2ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_GOAL_POSITION,
+                    goal,
                 )
 
-        for bus in self.buses:
-            if queued_any[bus.name]:
-                bus.flush_writes()
+            if dxl_comm_result != 0:
 
-    # FEEDBACK CALLBACK
-    def read_callback(self):
+                self.get_logger().error(
+                    f"Failed sending command to ID {dxl_id}"
+                )
 
-        # Each bus reads only its own joints. A comm failure on one
-        # arm's port does not block feedback for the other arm --
-        # ArmBus.read_positions() already falls back to last-known
-        # position per joint on a bad read.
-        merged_positions = {}
+            elif dxl_error != 0:
 
-        for bus in self.buses:
-            merged_positions.update(bus.read_positions())
+                self.get_logger().error(
+                    f"Dynamixel error on ID {dxl_id}"
+                )
 
-        msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = list(JOINT_ORDER)
-        msg.position = [merged_positions[name] for name in JOINT_ORDER]
+            else:
 
-        self.joint_state_pub.publish(msg)
+                self.get_logger().info(
+                    f"{joint_name} -> "
+                    f"{position_rad:.2f} rad "
+                    f"({goal})"
+                )
 
     # SPEED CALLBACK
+
     def speed_callback(self, msg):
 
         speed = int(msg.data / 100.0 * 1023)
+
         speed = max(20, min(speed, 1023))
 
-        for bus in self.buses:
-            bus.set_speed(speed)
+        for dxl_id in JOINT_TO_ID.values():
 
-        self.get_logger().info(f"Speed set to {msg.data}%")
+            self.packet_handler.write2ByteTxRx(
+                self.port_handler,
+                dxl_id,
+                ADDR_MOVING_SPEED,
+                speed,
+            )
+
+        self.get_logger().info(
+            f"Speed set to {msg.data}%"
+        )
+
 
     # SHUTDOWN
+
     def destroy_node(self):
 
         self.get_logger().info("Disabling torque...")
 
-        for bus in self.buses:
-            bus.disable_torque()
-            bus.close()
+        for dxl_id in JOINT_TO_ID.values():
+
+            self.packet_handler.write1ByteTxRx(
+                self.port_handler,
+                dxl_id,
+                ADDR_TORQUE_ENABLE,
+                TORQUE_DISABLE,
+            )
+
+        self.port_handler.closePort()
 
         super().destroy_node()
 
+
+# Main
 
 def main(args=None):
 
@@ -224,8 +224,10 @@ def main(args=None):
 
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
         node.destroy_node()
         rclpy.shutdown()

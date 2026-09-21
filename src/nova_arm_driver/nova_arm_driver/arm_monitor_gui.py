@@ -166,6 +166,7 @@ class App:
         self.latest = {}
         self.servo_rx = 0.0
         self.health = None
+        self.presenter_state = None
         self.health_rx = 0.0
         self.events = deque(maxlen=200)                    # (t, name)
         self.marker_artists = []
@@ -315,7 +316,9 @@ class App:
                 elif kind == "presenter":
                     self.set_badge(self.presenter_lbl, payload,
                                    PRESENTER_COLORS.get(payload, "#6b7280"))
-                    self.add_log(f"Presenter: {payload}", "info", t)
+                    if payload != self.presenter_state:      # heartbeat repeats: log changes only
+                        self.add_log(f"Presenter: {payload}", "info", t)
+                        self.presenter_state = payload
                 elif kind == "log":
                     self.add_log(payload[0], payload[1], t)
         except queue.Empty:

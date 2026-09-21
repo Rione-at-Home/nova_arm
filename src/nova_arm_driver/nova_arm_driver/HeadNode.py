@@ -1,15 +1,18 @@
 #  ROS2 controller node for Sudo's pan-tilt head AND the cat head on the back.
-#  Every axis (pan, tilt, cat1, cat2) uses the same pipeline:
-#  One Euro Filter on the target -> quintic trajectory -> Dynamixel command.
 #
-#  Extras:
-#   * Startup hold: for the first `startup_hold_sec` nothing is sent to the
-#     motors; the filters are only warmed up, then every axis is reseeded at
-#     its calibrated zero. This prevents the drastic move at node start.
-#   * Rate limit: commanded motion is capped at `max_speed` deg/s (backstop).
-#   * Idle sway: when nobody is commanding a group, it gently sways
-#     left-right (pan / cat1) with a slight vertical motion (cat2), and fades
-#     out while targets are being commanded.
+#  Behaviour
+#   * Startup: every axis HOLDS its calibrated zero. Filters are bypassed and
+#     nothing is commanded for `startup_hold_sec`.
+#   * Commanded movement (a target arrives on a topic): that axis switches to
+#     One Euro filter -> quintic trajectory, starting from where it is now.
+#     After `idle_resume_sec` without a new target the axis goes back to
+#     holding its position with filters bypassed.
+#   * Idle sway: when a group is not being commanded it gently sways
+#     left-right (pan / cat1) with a slight vertical motion (cat2). The sway
+#     starts at zero offset and fades in/out; it fades out during commands.
+#   * Rate limit: commanded motion is capped at `max_speed` deg/s.
+#   * Diagnostics: at startup it logs how far each motor drifted after
+#     torque-on and warns if another node already publishes the target topics.
 #
 #  Topics (all std_msgs/Float32, degrees from the startup position):
 #    /head/pan_target    /head/tilt_target
@@ -26,9 +29,10 @@ from .HeadDriver import DynamixelDriver
 
 
 class Axis:
-    """One filtered, quintic-profiled axis. Same logic as the original pan/tilt code."""
+    """One axis. Bypassed (holds `current`) until a target is commanded."""
 
-    def __init__(self, dt, min_cutoff, beta, d_cutoff):
+    def __init__(self, name, dt, min_cutoff, beta, d_cutoff):
+        self.name = name
         self.filter = OneEuroFilter(
             dt=dt,
             min_cutoff=min_cutoff,
@@ -41,19 +45,31 @@ class Axis:
         self.goal = 0.0
         self.start = 0.0
         self.elapsed = 0.0
+        self.active = False
+        self.last_cmd = None
 
-    def warmup(self):
-        # Feed the filter only; nothing is commanded.
-        self.filtered = self.filter.update(self.raw)
+    def command(self, value, now):
+        if not self.active:
+            # Start filter and trajectory exactly where the axis is now
+            self.filter.reset(self.current)
+            self.filtered = self.current
+            self.goal = self.current
+            self.start = self.current
+            self.elapsed = 0.0
+            self.active = True
 
-    def reseed(self):
-        # Start the trajectory from the calibrated zero.
-        self.current = 0.0
-        self.goal = 0.0
-        self.start = 0.0
-        self.elapsed = 0.0
+        self.raw = float(value)
+        self.last_cmd = now
+
+    def release_if_quiet(self, now, quiet_sec):
+        if (self.active and self.last_cmd is not None
+                and now - self.last_cmd > quiet_sec):
+            self.active = False   # hold current position, filters bypassed
 
     def step(self, dt, motion_time):
+        if not self.active:
+            return self.current
+
         # Filter raw target, retarget the trajectory if it moved enough
         self.filtered = self.filter.update(self.raw)
 
@@ -95,7 +111,7 @@ class HeadNode(Node):
 
         # Idle sway (degrees / seconds). Amplitude 0 disables an axis.
         self.declare_parameter("idle_enable", True)
-        self.declare_parameter("idle_resume_sec", 5.0)     # quiet time before sway resumes
+        self.declare_parameter("idle_resume_sec", 5.0)     # quiet time before sway/hold resumes
         self.declare_parameter("idle_fade_sec", 2.0)       # fade in/out time
         self.declare_parameter("idle_pan_amp", 8.0)
         self.declare_parameter("idle_pan_period", 9.0)
@@ -123,28 +139,29 @@ class HeadNode(Node):
         self.idle_resume = float(gp("idle_resume_sec").value)
         self.idle_fade = float(gp("idle_fade_sec").value)
 
-        # name -> (amplitude, period, phase offset)
+        # name -> (amplitude, period)
         self.idle = {
-            "pan": (float(gp("idle_pan_amp").value), float(gp("idle_pan_period").value), 0.0),
-            "tilt": (float(gp("idle_tilt_amp").value), float(gp("idle_tilt_period").value), 0.7),
-            "cat1": (float(gp("idle_cat1_amp").value), float(gp("idle_cat1_period").value), 1.7),
-            "cat2": (float(gp("idle_cat2_amp").value), float(gp("idle_cat2_period").value), 3.1),
+            "pan": (float(gp("idle_pan_amp").value), float(gp("idle_pan_period").value)),
+            "tilt": (float(gp("idle_tilt_amp").value), float(gp("idle_tilt_period").value)),
+            "cat1": (float(gp("idle_cat1_amp").value), float(gp("idle_cat1_period").value)),
+            "cat2": (float(gp("idle_cat2_amp").value), float(gp("idle_cat2_period").value)),
         }
 
         self.control_period = 0.05  # 20 Hz
 
-        def make_axis():
+        def make_axis(name):
             return Axis(
+                name,
                 self.control_period,
                 self.min_cutoff,
                 self.beta,
                 self.d_cutoff,
             )
 
-        self.pan = make_axis()
-        self.tilt = make_axis()
-        self.cat1 = make_axis()
-        self.cat2 = make_axis()
+        self.pan = make_axis("pan")
+        self.tilt = make_axis("tilt")
+        self.cat1 = make_axis("cat1")
+        self.cat2 = make_axis("cat2")
         self.axes = [self.pan, self.tilt, self.cat1, self.cat2]
 
         self.driver = DynamixelDriver(
@@ -159,10 +176,11 @@ class HeadNode(Node):
 
         # Startup / idle state
         self.t0 = self.now()
-        self.seeded = False
+        self.started = False
         self.idle_ok_after = self.t0 + self.startup_hold + 2.0
         self.last_cmd = {"head": None, "cat": None}
         self.idle_scale = {"head": 0.0, "cat": 0.0}
+        self.sway_t0 = {"head": self.t0, "cat": self.t0}
         self.prev_cmd = {"pan": 0.0, "tilt": 0.0, "cat1": 0.0, "cat2": 0.0}
 
         self.create_subscription(Float32, "/head/pan_target", self.pan_cb, 10)
@@ -183,34 +201,61 @@ class HeadNode(Node):
 
     # ------------------------------------------------------------ callbacks
 
+    def on_target(self, axis, group, value):
+        now = self.now()
+        if axis.last_cmd is None:
+            self.get_logger().info(
+                f"First target received for {axis.name}: {value:.1f} deg"
+            )
+        axis.command(value, now)
+        self.last_cmd[group] = now
+
     def pan_cb(self, msg: Float32):
-        self.pan.raw = msg.data
-        self.last_cmd["head"] = self.now()
+        self.on_target(self.pan, "head", msg.data)
 
     def tilt_cb(self, msg: Float32):
-        self.tilt.raw = msg.data
-        self.last_cmd["head"] = self.now()
+        self.on_target(self.tilt, "head", msg.data)
 
     def cat1_cb(self, msg: Float32):
-        self.cat1.raw = msg.data
-        self.last_cmd["cat"] = self.now()
+        self.on_target(self.cat1, "cat", msg.data)
 
     def cat2_cb(self, msg: Float32):
-        self.cat2.raw = msg.data
-        self.last_cmd["cat"] = self.now()
+        self.on_target(self.cat2, "cat", msg.data)
 
     # ------------------------------------------------------------ helpers
 
-    def sway(self, name, t):
-        """Smooth, non-repeating-looking offset in degrees (two mixed sines)."""
-        amp, period, phase = self.idle[name]
+    def report_startup(self):
+        """Log what actually happened at torque-on, and who else publishes targets."""
+
+        drift = self.driver.startup_drift()
+        text = ", ".join(
+            f"{k}={'read failed' if v is None else f'{v:+d} ticks'}"
+            for k, v in drift.items()
+        )
+        self.get_logger().info(f"Startup drift after torque-on: {text}")
+
+        if any(v is not None and abs(v) > 5 for v in drift.values()):
+            self.get_logger().warn(
+                "A motor moved after torque-on (>5 ticks). "
+                "Motion is coming from the hardware side, not from filters."
+            )
+
+        for topic in ("/head/pan_target", "/head/tilt_target",
+                      "/cat/joint1_target", "/cat/joint2_target"):
+            n = self.count_publishers(topic)
+            if n > 0:
+                self.get_logger().warn(
+                    f"{n} node(s) already publish {topic}. "
+                    f"Check `ros2 topic info {topic} -v`."
+                )
+
+    def sway(self, name, ts):
+        """Offset in degrees, zero at ts=0 (two mixed sines, less mechanical)."""
+        amp, period = self.idle[name]
         if amp <= 0.0 or period <= 0.0:
             return 0.0
         w = 2.0 * math.pi / period
-        return amp * (
-            0.7 * math.sin(w * t + phase)
-            + 0.3 * math.sin(w * t / 1.7 + 2.3 * phase + 1.0)
-        )
+        return amp * (0.7 * math.sin(w * ts) + 0.3 * math.sin(w * ts / 1.7))
 
     def update_idle_scale(self, group, now):
         """Fade sway in when the group is quiet, out while targets are commanded."""
@@ -222,6 +267,11 @@ class HeadNode(Node):
         s = self.idle_scale[group]
         s = min(target, s + step) if target > s else max(target, s - step)
         self.idle_scale[group] = s
+
+        # Restart the sway phase from zero whenever it is fully off
+        if s == 0.0:
+            self.sway_t0[group] = now
+
         return s
 
     def limit(self, name, value):
@@ -238,32 +288,33 @@ class HeadNode(Node):
         dt = self.control_period
         mt = self.motion_time
         now = self.now()
-        t = now - self.t0
 
-        # Startup hold: warm up filters, send nothing. Motors keep their start pose.
-        if t < self.startup_hold:
-            for ax in self.axes:
-                ax.warmup()
+        # Startup hold: send nothing, motors keep their start pose.
+        if now - self.t0 < self.startup_hold:
             return
 
-        if not self.seeded:
-            for ax in self.axes:
-                ax.reseed()
-            self.seeded = True
+        if not self.started:
+            self.started = True
+            self.report_startup()
             self.get_logger().info("Startup hold finished. Head is live.")
+
+        for ax in self.axes:
+            ax.release_if_quiet(now, self.idle_resume)
 
         head_s = self.update_idle_scale("head", now)
         cat_s = self.update_idle_scale("cat", now)
+        th = now - self.sway_t0["head"]
+        tc = now - self.sway_t0["cat"]
 
         # Hardware Command
-        pan = self.pan.step(dt, mt) + head_s * self.sway("pan", t)
-        tilt = self.tilt.step(dt, mt) + head_s * self.sway("tilt", t)
+        pan = self.pan.step(dt, mt) + head_s * self.sway("pan", th)
+        tilt = self.tilt.step(dt, mt) + head_s * self.sway("tilt", th)
         self.driver.set_pan(self.limit("pan", pan))
         self.driver.set_tilt(self.limit("tilt", tilt))
 
         if self.use_cat:
-            c1 = self.cat1.step(dt, mt) + cat_s * self.sway("cat1", t)
-            c2 = self.cat2.step(dt, mt) + cat_s * self.sway("cat2", t)
+            c1 = self.cat1.step(dt, mt) + cat_s * self.sway("cat1", tc)
+            c2 = self.cat2.step(dt, mt) + cat_s * self.sway("cat2", tc)
             self.driver.set_cat(1, self.limit("cat1", c1))
             self.driver.set_cat(2, self.limit("cat2", c2))
 

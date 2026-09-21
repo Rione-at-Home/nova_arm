@@ -134,7 +134,7 @@ class ArmHealthCoordinator(Node):
         self.create_service(Trigger, "/arm_health/reset", self.reset_cb)
 
         pattern = g("restore_service_pattern")
-        self.clients = {i: self.create_client(Trigger, pattern.format(id=i))
+        self.restore_clients = {i: self.create_client(Trigger, pattern.format(id=i))
                         for i in self.servo_ids}
 
         # ---- state -------------------------------------------------------
@@ -408,7 +408,7 @@ class ArmHealthCoordinator(Node):
                     return
             elif now - self.call_start > self.service_timeout:
                 try:
-                    self.clients[sid].remove_pending_request(self.pending)
+                    self.restore_clients[sid].remove_pending_request(self.pending)
                 except Exception:                 # noqa: BLE001
                     pass
                 self.recovery_failed(f"ID {sid}: restore service timed out")
@@ -418,7 +418,7 @@ class ArmHealthCoordinator(Node):
 
         if self.queue:
             sid = self.queue.pop(0)
-            client = self.clients[sid]
+            client = self.restore_clients[sid]
             if not client.service_is_ready():
                 self.to_fault(f"restore service for ID {sid} not available; "
                               f"is the modified ArmDriver running?")

@@ -9,13 +9,21 @@ starts. After `delay_sec` (default 6 s) a std_msgs/String is published on
 
 Test only: it does NOT move the robot.
 
+[STATUS] Also publishes /qr_trigger_status (std_msgs/String, JSON, 5 Hz) so a
+monitor (arm_monitor_gui.py) can show camera/QR visibility and the countdown:
+  {state, camera_ok, detected, valid, payload, expected, consecutive,
+   confirm_frames, remaining, cooldown_remaining, delay}
+
 Run:
     python3 qr_trigger.py
     python3 qr_trigger.py --ros-args -p expected_payload:=NOVA_START -p show:=true
 
 Watch the result:
     ros2 topic echo /presenter_trigger
+    ros2 topic echo /qr_trigger_status
 """
+
+import json
 
 import cv2
 import rclpy
@@ -61,9 +69,16 @@ class QRTrigger(Node):
         self.cooldown_until = None
         self.last_logged_sec = None
 
+        # [STATUS] bookkeeping for the status topic
+        self.last_image_t = None      # any image received
+        self.last_detect_t = None     # any QR decoded (even wrong payload)
+        self.last_data = ""
+
         self.create_subscription(Image, topic, self.image_callback, 1)
         self.trigger_pub = self.create_publisher(String, "/presenter_trigger", 10)
+        self.status_pub = self.create_publisher(String, "/qr_trigger_status", 10)  # [STATUS]
         self.create_timer(0.1, self.tick)
+        self.create_timer(0.2, self.publish_status)                                # [STATUS]
 
         self.get_logger().info(
             f"Listening on {topic} | delay={self.delay}s | "
@@ -77,9 +92,13 @@ class QRTrigger(Node):
 
     def image_callback(self, msg):
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        self.last_image_t = self.now()                     # [STATUS]
 
         data, points, _ = self.detector.detectAndDecode(frame)
         valid = bool(data) and (not self.expected or data == self.expected)
+        if data:                                           # [STATUS]
+            self.last_data = data
+            self.last_detect_t = self.now()
 
         if valid:
             self.consecutive += 1
@@ -135,6 +154,28 @@ class QRTrigger(Node):
                 self.state = IDLE
                 self.consecutive = 0
                 self.get_logger().info("Ready for next trigger.")
+
+    # ---------------------------------------------------------- [STATUS]
+
+    def publish_status(self):
+        t = self.now()
+        fresh = lambda stamp, age: stamp is not None and t - stamp < age  # noqa: E731
+        status = {
+            "state": self.state,
+            "camera_ok": fresh(self.last_image_t, 2.0),
+            "detected": fresh(self.last_detect_t, 0.7),   # any QR in view
+            "valid": fresh(self.last_seen, 0.7),          # expected QR in view
+            "payload": self.last_data if fresh(self.last_detect_t, 0.7) else "",
+            "expected": self.expected,
+            "consecutive": self.consecutive,
+            "confirm_frames": self.confirm_frames,
+            "delay": self.delay,
+            "remaining": (max(0.0, self.delay - (t - self.armed_at))
+                          if self.state == ARMED else None),
+            "cooldown_remaining": (max(0.0, self.cooldown_until - t)
+                                   if self.state == COOLDOWN else None),
+        }
+        self.status_pub.publish(String(data=json.dumps(status)))
 
 
 def main(args=None):

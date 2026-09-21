@@ -199,7 +199,29 @@ class DynamixelDriver:
                 f"Cannot read XM ID={dxl_id}; refusing to enable torque"
             )
 
-        self.write_cat_position(dxl_id, present)
+        verified = False
+
+        for _ in range(5):
+
+            self.write_cat_position(dxl_id, present)
+
+            goal, comm_result, error = self.packet_handler_xm.read4ByteTxRx(
+                self.port_handler,
+                dxl_id,
+                XM_ADDR_GOAL_POSITION,
+            )
+
+            if comm_result == 0 and error == 0 and goal == int(present):
+                verified = True
+                break
+
+            time.sleep(0.01)
+
+        if not verified:
+            raise RuntimeError(
+                f"Could not verify hold position on XM ID={dxl_id}; "
+                f"refusing to enable torque"
+            )
 
         comm_result, error = (
             self.packet_handler_xm.write1ByteTxRx(
@@ -225,10 +247,68 @@ class DynamixelDriver:
             TORQUE_DISABLE,
         )
 
+    def _read_ax(self, dxl_id, retries=3):
+        """Present position in ticks, or None if it could not be read."""
+
+        for _ in range(retries):
+            position, comm_result, error = (
+                self.packet_handler.read2ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_PRESENT_POSITION,
+                )
+            )
+
+            if comm_result == 0 and error == 0:
+                return position
+
+            time.sleep(0.01)
+
+        return None
+
+    def hold_current_ax(self, dxl_id, retries=5):
+        """
+        Write the present position as the goal and VERIFY it by reading the
+        goal register back, so torque-on cannot move the motor to a stale goal.
+        """
+
+        for _ in range(retries):
+
+            position = self._read_ax(dxl_id)
+
+            if position is None:
+                continue
+
+            comm_result, error = self.packet_handler.write2ByteTxRx(
+                self.port_handler,
+                dxl_id,
+                ADDR_GOAL_POSITION,
+                int(position),
+            )
+
+            if comm_result == 0 and error == 0:
+
+                goal, comm_result, error = self.packet_handler.read2ByteTxRx(
+                    self.port_handler,
+                    dxl_id,
+                    ADDR_GOAL_POSITION,
+                )
+
+                if comm_result == 0 and error == 0 and goal == int(position):
+                    return
+
+            time.sleep(0.01)
+
+        raise RuntimeError(
+            f"Could not verify hold position on AX ID={dxl_id}; "
+            f"refusing to enable torque"
+        )
+
     def enable(self):
 
-        self.enable_torque(self.pan_id)
-        self.enable_torque(self.tilt_id)
+        for i in (self.pan_id, self.tilt_id):
+            self.hold_current_ax(i)
+            self.enable_torque(i)
 
         if self.use_cat:
             for i in self.cat_ids:
@@ -318,13 +398,13 @@ class DynamixelDriver:
     # Calibration
     def calibrate_zero(self):
 
-        self.pan_zero = self.read_position(
-            self.pan_id
-        )
+        self.pan_zero = self._read_ax(self.pan_id)
+        self.tilt_zero = self._read_ax(self.tilt_id)
 
-        self.tilt_zero = self.read_position(
-            self.tilt_id
-        )
+        if self.pan_zero is None or self.tilt_zero is None:
+            raise RuntimeError(
+                "Cannot read pan/tilt position for zero calibration"
+            )
 
         print()
         print("=== ZERO CALIBRATION ===")
@@ -442,6 +522,25 @@ class DynamixelDriver:
         return (
             position - self.cat_zero[joint]
         ) / XM_TICKS_PER_DEGREE
+
+    # Diagnostics
+    def startup_drift(self):
+        """Ticks each motor has moved away from its calibrated zero (None = read failed)."""
+
+        drift = {}
+
+        pan = self._read_ax(self.pan_id)
+        tilt = self._read_ax(self.tilt_id)
+
+        drift["pan"] = None if pan is None else pan - self.pan_zero
+        drift["tilt"] = None if tilt is None else tilt - self.tilt_zero
+
+        if self.use_cat:
+            for i in self.cat_ids:
+                v = self.read_cat_position(i)
+                drift[f"cat{i}"] = None if v is None else v - self.cat_zero[i]
+
+        return drift
 
     # Cleanup
     def close(self):

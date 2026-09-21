@@ -323,7 +323,7 @@ class PresentorCoordinator(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PresenterCoordinator()
+    node = PresentorCoordinator()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

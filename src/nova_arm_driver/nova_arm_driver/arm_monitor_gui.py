@@ -17,6 +17,8 @@ Listens to
   /arm_health_state   /arm_health_detail   /arm_health_event   (health coordinator)
   /arm_motion_allowed std_msgs/Bool
   /presenter_state    std_msgs/String                    (presenter coordinator)
+  /qr_trigger_status  std_msgs/String (JSON)             (qr_trigger: camera/QR/countdown)
+  /presenter_trigger  std_msgs/String                    (logged when it fires)
 """
 
 import argparse
@@ -60,6 +62,7 @@ PRESENTER_COLORS = {"IDLE": "#6b7280", "DRIVE": "#1f6fd1", "SCAN": "#1f6fd1",
 EVENT_COLORS = {"ARM_PROBLEM_DETECTED": "#c62828", "ARM_RECOVERING": "#e08a00",
                 "ARM_RECOVERED": "#2e9e4f", "ARM_PROBLEM_CLEARED": "#2e9e4f",
                 "ARM_FAULT": "#000000"}
+QR_COLORS = {"IDLE": "#6b7280", "ARMED": "#7b1fa2", "COOLDOWN": "#1f6fd1"}
 NO_DATA_COLOR = "#9ca3af"
 STALE_AFTER_S = 3.5
 
@@ -96,6 +99,10 @@ class RosBridge:
                               lambda m: self._put("motion", bool(m.data)), latched)
         n.create_subscription(String, "/presenter_state",
                               lambda m: self._put("presenter", m.data), 10)
+        n.create_subscription(String, "/qr_trigger_status",
+                              lambda m: self._put("qr", m.data), 10)
+        n.create_subscription(String, "/presenter_trigger",
+                              lambda m: self._put("trigger", m.data), 10)
         self.reset_client = n.create_client(Trigger, "/arm_health/reset")
 
         self.executor = SingleThreadedExecutor()
@@ -167,6 +174,7 @@ class App:
         self.servo_rx = 0.0
         self.health = None
         self.presenter_state = None
+        self.qr_rx = 0.0
         self.health_rx = 0.0
         self.events = deque(maxlen=200)                    # (t, name)
         self.marker_artists = []
@@ -208,6 +216,22 @@ class App:
         self.presenter_lbl.pack(fill="x")
         self.servo_data_var = tk.StringVar(value="Servo data: waiting...")
         ttk.Label(pf, textvariable=self.servo_data_var).pack(anchor="w", pady=(4, 0))
+
+        qf = ttk.LabelFrame(top, text="QR trigger", padding=6)
+        qf.pack(side="left", fill="y", padx=(0, 6))
+        self.qr_lbl = tk.Label(qf, text="NO SIGNAL", width=14, fg="white",
+                               bg=NO_DATA_COLOR, font=("Helvetica", 20, "bold"))
+        self.qr_lbl.pack(fill="x")
+        self.qr_count_var = tk.StringVar(value="--")
+        ttk.Label(qf, textvariable=self.qr_count_var,
+                  font=("Helvetica", 26, "bold")).pack(pady=(2, 2))
+        self.qr_seen_lbl = tk.Label(qf, text="QR: -", bg=NO_DATA_COLOR, fg="white",
+                                    font=("Helvetica", 11, "bold"))
+        self.qr_seen_lbl.pack(fill="x")
+        self.qr_cam_var = tk.StringVar(value="Camera: -")
+        self.qr_frames_var = tk.StringVar(value="")
+        ttk.Label(qf, textvariable=self.qr_cam_var).pack(anchor="w", pady=(4, 0))
+        ttk.Label(qf, textvariable=self.qr_frames_var).pack(anchor="w")
 
         lf = ttk.LabelFrame(top, text="Event log", padding=4)
         lf.pack(side="left", fill="both", expand=True)
@@ -319,6 +343,10 @@ class App:
                     if payload != self.presenter_state:      # heartbeat repeats: log changes only
                         self.add_log(f"Presenter: {payload}", "info", t)
                         self.presenter_state = payload
+                elif kind == "qr":
+                    self.handle_qr(t, payload)
+                elif kind == "trigger":
+                    self.add_log("QR trigger fired -> /presenter_trigger", "ok", t)
                 elif kind == "log":
                     self.add_log(payload[0], payload[1], t)
         except queue.Empty:
@@ -330,6 +358,9 @@ class App:
         now = time.time()
         if self.health is not None and now - self.health_rx > STALE_AFTER_S:
             self.set_badge(self.health_lbl, "NO SIGNAL", NO_DATA_COLOR)
+        if self.qr_rx and now - self.qr_rx > STALE_AFTER_S:
+            self.set_badge(self.qr_lbl, "NO SIGNAL", NO_DATA_COLOR)
+            self.qr_count_var.set("--")
         if self.servo_rx:
             age = now - self.servo_rx
             self.servo_data_var.set("Servo data: OK" if age < STALE_AFTER_S
@@ -355,6 +386,34 @@ class App:
                          "bad" if state == "FAULT" else "ok" if state == "HEALTHY" else "warn", t)
             self.health = state
         self.set_badge(self.health_lbl, state, HEALTH_COLORS.get(state, "#6b7280"))
+
+    def handle_qr(self, t, raw):
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            return
+        self.qr_rx = t
+        state = d.get("state", "?")
+        self.set_badge(self.qr_lbl, state, QR_COLORS.get(state, "#6b7280"))
+        if state == "ARMED" and d.get("remaining") is not None:
+            self.qr_count_var.set(f"{d['remaining']:.1f} s")
+        elif state == "COOLDOWN" and d.get("cooldown_remaining") is not None:
+            self.qr_count_var.set(f"cooldown {d['cooldown_remaining']:.0f} s")
+        else:
+            self.qr_count_var.set("--")
+
+        if d.get("valid"):
+            self.qr_seen_lbl.configure(text="QR: SEEN", bg="#2e9e4f")
+        elif d.get("detected"):
+            self.qr_seen_lbl.configure(
+                text=f"QR: wrong code '{d.get('payload', '')[:14]}'", bg="#e08a00")
+        else:
+            self.qr_seen_lbl.configure(text="QR: not seen", bg="#6b7280")
+
+        self.qr_cam_var.set("Camera: OK" if d.get("camera_ok") else "Camera: NO IMAGES")
+        self.qr_frames_var.set(
+            f"Confirm frames: {d.get('consecutive', 0)}/{d.get('confirm_frames', '?')}"
+            if state == "IDLE" else "")
 
     def handle_detail(self, raw):
         try:

@@ -50,7 +50,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Empty, Float32, Int32, String
 
 
-class PresentorCoordinator(Node):
+class PresenterCoordinator(Node):
 
     def __init__(self):
         super().__init__("presenter_coordinator")
@@ -323,7 +323,7 @@ class PresentorCoordinator(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PresentorCoordinator()
+    node = PresenterCoordinator()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

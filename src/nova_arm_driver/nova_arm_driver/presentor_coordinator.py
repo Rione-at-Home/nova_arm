@@ -68,7 +68,7 @@ class PresenterCoordinator(Node):
         # Head node needs ~3-4 s to finish each move, so dwell defaults to 4 s.
         self.declare_parameter("scan_pan", [-35.0, 35.0, -20.0, 0.0])
         self.declare_parameter("scan_tilt", [0.0, 0.0, 0.0, 0.0])
-        self.declare_parameter("scan_dwell", 4.0)
+        self.declare_parameter("scan_dwell", 3.0)
 
         self.declare_parameter("tts_topic", "/tts/say")
         self.declare_parameter("speech_text", "どうぞ、名刺をお取りください。")
@@ -246,12 +246,14 @@ class PresenterCoordinator(Node):
             dur=self.forward_distance / self.forward_speed,
             enter=None, tick=self.drive_tick, exit=self.stop_base,
         )]
+
         for pan, tilt in zip(self.scan_pan, self.scan_tilt):
             steps.append(dict(
                 name="SCAN", dur=self.scan_dwell,
                 enter=lambda a=pan, b=tilt: self.look(a, b),
                 tick=None, exit=None,
             ))
+
         steps.append(dict(
             name="SPEAK", dur=self.speech_duration,
             enter=self.speak, tick=None, exit=None,

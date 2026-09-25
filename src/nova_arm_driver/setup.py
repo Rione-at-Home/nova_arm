@@ -6,12 +6,13 @@ setup(
     name=package_name,
     version='0.0.0',
     packages=find_packages(exclude=['test']),
-        data_files=[
+    data_files=[
         ("share/ament_index/resource_index/packages",
             ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch",
-            ["launch/arm_driver.launch.py"]),
+            ["launch/arm_driver.launch.py",
+             "launch/expo.launch.py"]),          # <-- added
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -30,6 +31,13 @@ setup(
             'nova_teleop = nova_arm_driver.nova_teleop:main',
             'nova_pose_manager = nova_arm_driver.nova_pose_manager:main',
             'nova_demo = nova_arm_driver.nova_demo:main',
+            'qr_trigger = nova_arm_driver.qr_trigger:main',
+            'presenter_coordinator = nova_arm_driver.presentor_coordinator:main',
+            'HeadNode = nova_arm_driver.HeadNode:main',
+            'arm_health_coordinator = nova_arm_driver.arm_health_coordinator:main',
+            # optional: lets you start the GUI with `ros2 run nova_arm_driver arm_monitor_gui`
+            # (only if you copy arm_monitor_gui.py into the nova_arm_driver/ package folder)
+            'arm_monitor_gui = nova_arm_driver.arm_monitor_gui:main',
         ],
     },
 )

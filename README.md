@@ -111,7 +111,7 @@ python3 arm_monitor_gui.py --window 300 --servos 1 2 3 4 5 6
 
 Shows the arm health state, the presenter state, the QR trigger (camera OK, QR seen, confirm frames, countdown), an event log, a per-servo table (torque, position, goal, temperature, voltage, load, Torque Limit, Max Torque, error flags) and live charts of temperature, load, Torque Limit and position. It only listens, except for one button that calls `/arm_health/reset` to leave a `FAULT` after a human has fixed the problem.
 
-![alt text](<Screenshot from 2026-09-21 17-02-12.png>)
+![alt text](<ui.png>)
 
 ## Presenter coordinator
 

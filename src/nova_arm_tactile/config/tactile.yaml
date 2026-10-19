@@ -1,0 +1,54 @@
+# nova_arm_tactile parameters. Values marked TUNE need checking on the real robot.
+
+arm_tactile:
+  ros__parameters:
+    sides: ["right", "left"]
+    baud: 2000000
+    baseline_frames: 30
+    contact_threshold: 15.0        # counts above baseline for a taxel to count as touched
+    contact_min_taxels: 2
+    publish_image: true
+    status_rate_hz: 2.0
+    reconnect_period_s: 3.0
+    stale_s: 0.5
+    min_rate_hz: 50.0
+    right:
+      port: /dev/tactile_right     # udev symlink, see udev/99-tactile-pads.rules
+      mask: ""                     # dead/stuck taxels, "r,c;r,c"
+      active_region: ""            # "r0:r1,c0:c1" if part of the pad overhangs the finger
+      frame_id: right_gripper_tactile
+    left:
+      port: /dev/tactile_left
+      mask: ""
+      active_region: ""
+      frame_id: left_gripper_tactile
+
+arm_grasp:
+  ros__parameters:
+    sides: ["right", "left"]
+    control_rate_hz: 25.0
+    state_rate_hz: 10.0
+    auto_rezero_on_open: true
+    right:
+      open_rad: 0.0                # TUNE: read /joint_states with the gripper fully open
+      closed_rad: 0.79             # TUNE: from the saved "grasp" pose; furthest it may drive
+    left:
+      open_rad: 0.0                # TUNE: the left gripper may close toward NEGATIVE angles
+      closed_rad: 0.79             # TUNE
+    close_speed: 0.4               # rad/s approach
+    squeeze_speed: 0.08            # rad/s tightening
+    target_total: 300.0            # TUNE per object class (cup vs. bottle vs. tray), or per goal
+    max_squeeze_rad: 0.15          # TUNE: max goal travel past first contact (AX-12A overload guard)
+    contact_confirm_ticks: 2
+    settle_s: 0.3
+    slip_ratio: 0.6
+    overshoot_ratio: 2.5
+    lost_ticks: 10
+    stall_rad: 0.12
+    stall_s: 0.4
+    open_tol_rad: 0.05
+    open_timeout_s: 3.0
+    goal_timeout_s: 8.0
+    calib_wait_s: 2.0
+    tactile_stale_s: 0.25
+    joint_stale_s: 0.5

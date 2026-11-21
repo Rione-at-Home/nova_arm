@@ -38,6 +38,7 @@ setup(
             # optional: lets you start the GUI with `ros2 run nova_arm_driver arm_monitor_gui`
             # (only if you copy arm_monitor_gui.py into the nova_arm_driver/ package folder)
             'arm_monitor_gui = nova_arm_driver.arm_monitor_gui:main',
+            'nova_gui = nova_arm_driver.nova_gui:main',
         ],
     },
 )

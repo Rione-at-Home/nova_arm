@@ -118,3 +118,48 @@ tray_hold_v2:
   - 1.3435452453035526
   - -0.9443203724133543
   - 0.5450954995231555
+point_start:
+  names:
+  - joint1
+  - joint2
+  - joint3
+  - joint4
+  - joint5
+  - gripper
+  positions:
+  - 1.546
+  - -1.523
+  - -0.401
+  - 0.0
+  - 0.0
+  - 0.0
+point_left:
+  names:
+  - joint1
+  - joint2
+  - joint3
+  - joint4
+  - joint5
+  - gripper
+  positions:
+  - 1.546
+  - -1.523
+  - -0.401
+  - 0.0
+  - -1.752
+  - 0.0
+point_right:
+  names:
+  - joint1
+  - joint2
+  - joint3
+  - joint4
+  - joint5
+  - gripper
+  positions:
+  - 1.546
+  - -1.523
+  - -0.401
+  - 0.0
+  - 1.684
+  - 0.0

@@ -39,6 +39,8 @@ setup(
             # (only if you copy arm_monitor_gui.py into the nova_arm_driver/ package folder)
             'arm_monitor_gui = nova_arm_driver.arm_monitor_gui:main',
             'nova_gui = nova_arm_driver.nova_gui:main',
+            'seat_pointer = nova_arm_driver.nova_seat_pointer:main',
+            'arm_skills = nova_arm_driver.arm_skills:main',
         ],
     },
 )

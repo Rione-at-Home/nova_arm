@@ -98,19 +98,27 @@ class ArmDriver(Node):
         self.declare_parameter("require_motion_inhibit_for_restore", True)
         self.motion_allowed = True
 
-        self.port_handler = PortHandler(PORT_NAME)
+        # Serial port and baud rate as parameters (defaults unchanged), so the arm can run next to the
+        # head / Kobuki USB adapters: ros2 run nova_arm_driver arm_driver --ros-args -p port:=/dev/ttyUSB1
+        # (better: a udev symlink or /dev/serial/by-id/..., which do not change between boots)
+        self.declare_parameter("port", PORT_NAME)
+        self.declare_parameter("baudrate", BAUDRATE)
+        port = str(self.get_parameter("port").value)
+        baudrate = int(self.get_parameter("baudrate").value)
+
+        self.port_handler = PortHandler(port)
         self.packet_handler = PacketHandler(PROTOCOL_VERSION)
 
         # CONNECT TO DYNAMIXELS
 
         if not self.port_handler.openPort():
-            raise RuntimeError(f"Failed to open {PORT_NAME}")
+            raise RuntimeError(f"Failed to open {port}")
 
-        if not self.port_handler.setBaudRate(BAUDRATE):
+        if not self.port_handler.setBaudRate(baudrate):
             raise RuntimeError("Failed to set baudrate")
 
         self.get_logger().info(
-            f"Connected to Dynamixels on {PORT_NAME}"
+            f"Connected to Dynamixels on {port}"
         )
 
         # ENABLE TORQUE

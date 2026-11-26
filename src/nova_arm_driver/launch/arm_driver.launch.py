@@ -13,6 +13,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -39,6 +40,15 @@ def generate_launch_description():
         ),
     )
 
+    port_arg = DeclareLaunchArgument(
+        "port",
+        default_value="/dev/ttyUSB0",
+        description=(
+            "Serial device of the arm's USB2Dynamixel (ArmDriver's `port` "
+            "parameter). Prefer /dev/serial/by-id/... or a udev symlink."
+        ),
+    )
+
     baudrate_arg = DeclareLaunchArgument(
         "baudrate",
         default_value="1000000",
@@ -53,13 +63,15 @@ def generate_launch_description():
         name="arm_driver",
         output="screen",
         parameters=[{
+            "port": LaunchConfiguration("port"),
             "right_port": LaunchConfiguration("right_port"),
             "left_port": LaunchConfiguration("left_port"),
-            "baudrate": LaunchConfiguration("baudrate"),
+            "baudrate": ParameterValue(LaunchConfiguration("baudrate"), value_type=int),
         }],
     )
 
     return LaunchDescription([
+        port_arg,
         right_port_arg,
         left_port_arg,
         baudrate_arg,

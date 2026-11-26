@@ -1,0 +1,58 @@
+# Robot geometry and settings for arm_skills (PointAt server).
+#   ros2 run nova_arm_driver arm_skills --ros-args --params-file ~/nova_arm_ws/robot_geometry.yaml
+#
+# MEASURE THE VALUES MARKED "MEASURE" ON THE ROBOT. A few cm of error is fine: seats are 1.5-3 m away,
+# so 5 cm off is ~1-2 degrees of pointing error.
+#
+# Frame base_link: origin on the floor at the base's centre of rotation (Kobuki: centre of the base),
+# x forward, y LEFT, z up, metres.
+#
+# Head conventions are sudohead's (same as gaze_controller): pan + = left, tilt + = down, degrees.
+
+arm_skills:
+  ros__parameters:
+    # --- head + camera ------------------------------------------------------------------------
+    head_pivot_xyz: [0.0, 0.0, 1.0]
+    camera_offset_xyz: [0.0, 0.0, 0.0]
+                                           #          at pan = tilt = 0 (forward, left, up)
+    head_pan_offset_deg: 0.0               # head pan reading when the camera looks straight forward
+    head_tilt_offset_deg: 0.0              # head tilt reading when the camera looks level
+
+    # --- arm ----------------------------------------------------------------------------------
+    arm_shoulder_xyz: [0.0, 0.0, 1.0]  
+                                           #          height of the shoulder, in base_link
+    arm_side: right                        # which side the arm is on (PointAt "arm" field)
+    joint1_forward: 1.546                  # CALIBRATE: joint1 (rad) when the arm points straight forward
+    joint1_sign: 1.0                       # CALIBRATE: +1 if increasing joint1 turns the arm LEFT, else -1
+    joint1_min: -2.5                       # joint1 range used for pointing (rad)
+    joint1_max: 2.5
+    reach_margin_deg: 10.0                 # target up to this far outside the range: point at the limit
+
+    # Pointing shape: joints 2-5 + gripper come from this pose in poses.yaml (joint1 is replaced).
+    # Teach it in nova_gui: arm stretched out, aimed STRAIGHT FORWARD and roughly LEVEL.
+    point_pose: point_start
+    tuck_pose: home                        # driving pose (inside the robot's footprint)
+    zero_before_point: true
+    poses_file: ~/nova_arm_ws/poses.yaml
+
+    # Optional: tilt one joint up/down by the target's elevation (seats are below the shoulder).
+    pitch_joint: ""                        # e.g. "joint2"; "" = off (keep point_seat's pitch)
+    pitch_sign: 1.0                        # +1 if increasing that joint raises the arm
+    pitch_max_rad: 0.6
+
+    # --- motion -------------------------------------------------------------------------------
+    speed_percent: 30                     # /arm_speed sent before every move
+    max_joint_vel: 0.8                # rad/s, sets move duration
+    min_move_time: 0.8
+    # "arrived": joint1-5 measured from ArmDriver's /arm_servo_status (2 Hz). No status at all: settle_s.
+    arrive_tol_rad: 0.05                   # every checked joint this close -> arrived
+    close_rad: 0.12                        # ... or this close and not moving for still_s (a joint sagging
+    still_s: 1.2                           #     under the arm's weight) -> arrived, noted in the result
+    arrive_timeout_s: 3.0
+    settle_s: 0.5                          # only when there is no arm feedback at all
+    status_fresh_s: 1.5
+
+    # --- feedback (same idea as gaze_controller) ----------------------------------------------
+    head_feedback: auto                    # auto (measured /joint_states when fresh, else commanded) | measured | commanded
+    history_s: 120.0                       # head / odom history kept: seat positions can be a minute old
+    base_compensation: true                # base turned since the image (Kobuki /odom yaw)? rotate the target back
